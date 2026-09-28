@@ -93,7 +93,7 @@
 ## 🚀 Установка
 
 <details open>
-🪟 [**Windows**](https://github.com/ZeBro-pentest/Fastburn)
+<summary><b>🪟 [**Windows**](https://github.com/ZeBro-pentest/Fastburn)</b></summary>
 
 1. Скачайте архив последнего релиза: [**Releases**](https://github.com/ZeBro-pentest/Fastburn/releases/latest)
 2. Распакуйте его в любую папку
