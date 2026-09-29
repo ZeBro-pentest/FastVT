@@ -1,3 +1,24 @@
 prompts/
 .venv/
+venv/
 history/
+
+# Python: байт-код и кэш импорта
+__pycache__/
+*.py[cod]
+
+# Тесты и покрытие
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Portable-архивы (FR-60)
+build/
+dist/
+*.egg-info/
+
+# Редакторы и ОС
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
