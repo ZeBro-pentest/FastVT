@@ -1,5 +1,5 @@
 <div align="center">
-  <h1>Fastburn</h1>
+  <h1>FastVT</h1>
   <p><b>Быстрый видео-таймер на Python</b><br>
   Рендеринг на вашей видеокарте, минимальный размер файла, полная кастомизация</p>
 
@@ -8,14 +8,14 @@
     <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat" alt="PRs Welcome"></a>
   </p>
   <p>
-    <a href="https://github.com/ZeBro-pentest/Fastburn/releases/latest"><img src="https://img.shields.io/badge/Windows-x64-0078D6?logo=windows&logoColor=white" alt="Windows"></a>
-    <a href="https://github.com/ZeBro-pentest/Fastburn/releases/latest"><img src="https://img.shields.io/badge/macOS-Apple-000000?logo=apple&logoColor=white" alt="macOS"></a>
-    <a href="https://github.com/ZeBro-pentest/Fastburn/releases/latest"><img src="https://img.shields.io/badge/Linux-Any-FCC624?logo=linux&logoColor=black" alt="Linux"></a>
+    <a href="https://github.com/ZeBro-pentest/FastVT/releases/latest"><img src="https://img.shields.io/badge/Windows-x64-0078D6?logo=windows&logoColor=white" alt="Windows"></a>
+    <a href="https://github.com/ZeBro-pentest/FastVT/releases/latest"><img src="https://img.shields.io/badge/macOS-Apple-000000?logo=apple&logoColor=white" alt="macOS"></a>
+    <a href="https://github.com/ZeBro-pentest/FastVT/releases/latest"><img src="https://img.shields.io/badge/Linux-Any-FCC624?logo=linux&logoColor=black" alt="Linux"></a>
   </p>
   <p>
     <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white" alt="Python">
     <img src="https://img.shields.io/badge/GUI-Tkinter-8B0000?logo=python&logoColor=white" alt="Tkinter">
-    <img src="https://img.shields.io/github/last-commit/ZeBro-pentest/Fastburn?style=flat" alt="Last commit">
+    <img src="https://img.shields.io/github/last-commit/ZeBro-pentest/FastVT?style=flat" alt="Last commit">
     <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey" alt="Platforms">
   </p>
 
@@ -29,7 +29,7 @@
 
 ---
 
-> **Fastburn** — это бесплатный видео-таймер с интерфейсом на Tkinter. Вы задаёте длительность
+> **FastVT** — это бесплатный видео-таймер с интерфейсом на Tkinter. Вы задаёте длительность
 > и оформление, программа рендерит готовый видеофайл на вашей видеокарте или процессоре —
 > без единого рекламного кадра и без лишних мегабайт.
 
@@ -93,33 +93,33 @@
 ## 🚀 Установка
 
 <details open>
-<summary><b>🪟 [**Windows**](https://github.com/ZeBro-pentest/Fastburn)</b></summary>
+<summary><b>🪟 [**Windows**](https://github.com/ZeBro-pentest/FastVT)</b></summary>
 
-1. Скачайте архив последнего релиза: [**Releases**](https://github.com/ZeBro-pentest/Fastburn/releases/latest)
+1. Скачайте архив последнего релиза: [**Releases**](https://github.com/ZeBro-pentest/FastVT/releases/latest)
 2. Распакуйте его в любую папку
-3. Запустите `Fastburn.exe`
+3. Запустите `FastVT.exe`
 
 Антивирус может ругаться на неподписанную сборку — это нормально для новых сборок
 без сертификата. При необходимости добавьте файл в исключения.
 </details>
 
 <details>
-<summary><b>🍎 [**MacOS**](https://github.com/ZeBro-pentest/Fastburn)</b></summary>
+<summary><b>🍎 [**MacOS**](https://github.com/ZeBro-pentest/FastVT)</b></summary>
 
-1. Скачайте архив: [**Releases**](https://github.com/ZeBro-pentest/Fastburn/releases/latest)
-2. Распакуйте и переместите `Fastburn.app` в «Программы»
+1. Скачайте архив: [**Releases**](https://github.com/ZeBro-pentest/FastVT/releases/latest)
+2. Распакуйте и переместите `FastVT.app` в «Программы»
 3. При первом запуске: **правый клик → Открыть** (обход проверки Gatekeeper)
 </details>
 
 <details>
-<summary><b>🐧 [**Linux**](https://github.com/ZeBro-pentest/Fastburn)</b></summary>
+<summary><b>🐧 [**Linux**](https://github.com/ZeBro-pentest/FastVT)</b></summary>
 
-1. Скачайте архив: [**Releases**](https://github.com/ZeBro-pentest/Fastburn/releases/latest)
+1. Скачайте архив: [**Releases**](https://github.com/ZeBro-pentest/FastVT/releases/latest)
 2. Распакуйте и запустите:
 
 ```bash
-chmod +x Fastburn
-./Fastburn
+chmod +x FastVT
+./FastVT
 ```
 
 Нужен Python 3 и Tkinter:
@@ -133,8 +133,8 @@ sudo apt install python3 python3-tk ffmpeg
 <summary><b>🐍 Из исходников</b></summary>
 
 ```bash
-git clone https://github.com/ZeBro-pentest/Fastburn.git
-cd Fastburn
+git clone https://github.com/ZeBro-pentest/FastVT.git
+cd FastVT
 python -m venv .venv
 source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
@@ -188,7 +188,7 @@ python main.py
 
 ## ⭐ Поддержать проект
 
-Если Fastburn оказался полезным, поставьте звезду — это лучший способ поддержать
+Если FastVT оказался полезным, поставьте звезду — это лучший способ поддержать
 разработку. Репостеры и звёздные пользователи попадут в раздел «Благодарности»
 в следующем релизе.
 
