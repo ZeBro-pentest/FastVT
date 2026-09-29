@@ -132,7 +132,7 @@ video_timer/
   encoders.py    выбор кодека по расширению, список доступных кодеков
   estimate.py    RenderEstimate, estimate(cfg)
   renderer.py    FFmpegRenderer: команда, запуск, прогресс, отмена
-  platform.py    поиск ffmpeg/ffprobe, шрифты по умолчанию, открытие папки
+  osutil.py     поиск ffmpeg/ffprobe, шрифты по умолчанию, открытие папки
   cli.py         разбор аргументов → TimerConfig → renderer
   gui/
     app.py       главное окно, сборка панелей
@@ -267,7 +267,7 @@ class FFmpegRenderer:
 def render(cfg: TimerConfig, on_progress=None) -> RenderResult: ...   # validate + run
 ```
 
-### 7.7 `platform.py`
+### 7.7 `osutil.py`
 
 ```python
 def find_ffmpeg() -> Path | None: ...                 # сначала ./ffmpeg рядом с приложением, затем PATH
