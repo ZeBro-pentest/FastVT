@@ -7,9 +7,10 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, NoReturn
 
 # since: v0.1 (FR-05)
 POSITIONS: tuple[str, ...] = ("tl", "tr", "bl", "br", "center")
@@ -60,6 +61,42 @@ COLOR_NAMES: tuple[str, ...] = (
 Список цветов ffmpeg шире, но интерфейс ограничен этими именами, чтобы
 ошибка в поле всегда читалась однозначно (FR-41).
 """
+
+_COLOR_HEX_RE = re.compile(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+"""Шаблон допустимых hex-форм цвета: ``#rgb`` или ``#rrggbb``."""
+
+_VIDEO_EXTS_SET = set(VIDEO_EXTS)
+"""Множество расширений видео для быстрой проверки ``background`` (FR-10)."""
+
+
+def _field_name_python_to_cli(name: str) -> str:
+    """Преобразовать имя поля `TimerConfig` в имя параметра CLI с дефисом.
+
+    Args:
+        name: имя поля датакласса, например ``font_size``.
+
+    Returns:
+        Имя в формате CLI, например ``font-size`` (FR-41).
+    """
+    return name.replace("_", "-")
+
+
+def _is_valid_color(value: str) -> bool:
+    """Проверить, допустим ли цвет в интерфейсе (FR-06, FR-10).
+
+    Допустимы формы ``#rgb``, ``#rrggbb`` и имена из :data:`COLOR_NAMES`.
+
+    Args:
+        value: строковое значение цвета.
+
+    Returns:
+        ``True`` — если цвет допустим, иначе ``False``.
+    """
+    if value in COLOR_NAMES:
+        return True
+    if _COLOR_HEX_RE.match(value):
+        return True
+    return False
 
 
 # since: v0.1 (FR-41, FR-42)
@@ -140,21 +177,20 @@ class TimerConfig:
 
         Спека: FR-40, FR-41, FR-42. Версия: v0.1 (поля v0.2+ пока не проверяются).
 
-        Проверки v0.1:
+        Проверки v0.1 (в порядке объявления полей, первая ошибка — ответ):
             - `output`: расширение `.mp4` (FR-20, полный список — v0.2)
             - `background`: файл существует; расширение из `VIDEO_EXTS` (FR-10)
-            - `bg_color`, `color`, `hold_color`: `#rgb`, `#rrggbb` или имя из
-              `COLOR_NAMES` (FR-06, FR-10)
+            - `bg_color`: `#rgb`, `#rrggbb` или имя из `COLOR_NAMES` (FR-10)
             - `mode`: одно из двух значений (FR-01, FR-02)
             - `countdown_seconds`: > 0 при `mode == "countdown"` (FR-02)
             - `duration`: > 0, если задан; обязателен для stopwatch без
               видео-фона (FR-12)
             - `position`: одно из `POSITIONS` (FR-05)
             - `font_size`: 8…500 (FR-06)
+            - `color`: как `bg_color` (FR-06)
             - `hold_seconds`: >= 0 (FR-03)
+            - `hold_color`: как `bg_color` (FR-03)
             - `fps`: 1…120 (FR-13)
-            - если фона-видео нет и `mode == "countdown"`, результат
-              считается равным `countdown_seconds + hold_seconds` (FR-12)
 
         Проверки v0.2 (объявлены, выполняются позже):
             - `fmt`: одно из `mmss`, `hhmmss`, `mmssms` (FR-04)
@@ -165,8 +201,13 @@ class TimerConfig:
             - `crf`: 0…51 при libx264 (FR-23)
             - `encoder`: совместим с контейнером (FR-21)
 
-        Порядок проверок — от первого поля к последнему, чтобы в GUI
-        подсвечивалось только первое ошибочное поле.
+        Порядок проверок совпадает с порядком объявления полей, поэтому
+        в GUI подсвечивается только первое ошибочное поле, а в сообщении
+        нет перечисления всех ошибок сразу (FR-41).
+
+        Побочных эффектов нет: файлы не создаются, ffprobe не запускается,
+        длина результата не вычисляется — это работа `renderer`
+        и `background` (FR-11, FR-12).
 
         Raises:
             VideoTimerError: сообщение вида «поле: что не так»; поле — имя
@@ -174,10 +215,74 @@ class TimerConfig:
                 используется только первая ошибка.
 
         Пример:
-            TimerConfig(output=Path("a.mp4"), font_size=0).validate()
+            TimerConfig(output=Path("a.mp4"), duration=8.0, font_size=0).validate()
             # VideoTimerError: font-size: должен быть от 8 до 500
         """
-        raise NotImplementedError
+        def fail(field: str, problem: str) -> NoReturn:
+            """Поднять `VideoTimerError` с именем поля в формате CLI.
+
+            Args:
+                field: имя поля датакласса, например ``font_size``.
+                problem: часть сообщения после двоеточия, на русском.
+
+            Returns:
+                Ничего, функция всегда бросает исключение.
+
+            Raises:
+                VideoTimerError: всегда (FR-41).
+            """
+            raise VideoTimerError(f"{_field_name_python_to_cli(field)}: {problem}")
+
+        color_problem = (
+            "ожидается #rgb, #rrggbb или имя цвета из списка: "
+            + ", ".join(COLOR_NAMES)
+        )
+
+        if self.output.suffix.lower() != ".mp4":
+            fail("output", "в этой версии допустимо расширение .mp4")
+
+        if self.background is not None:
+            if not self.background.exists():
+                fail("background", f"файл не найден: {self.background}")
+            if self.background.suffix.lower() not in _VIDEO_EXTS_SET:
+                fail(
+                    "background",
+                    "ожидается видеофайл (" + ", ".join(VIDEO_EXTS) + ")",
+                )
+
+        if not _is_valid_color(self.bg_color):
+            fail("bg_color", color_problem)
+
+        if self.mode not in ("stopwatch", "countdown"):
+            fail("mode", "ожидается stopwatch или countdown")
+
+        if self.mode == "countdown" and self.countdown_seconds <= 0:
+            fail("countdown_seconds", "должно быть больше 0")
+
+        if self.duration is not None and self.duration <= 0:
+            fail("duration", "должно быть больше 0")
+
+        if self.duration is None and self.background is None:
+            if self.mode == "stopwatch":
+                fail("duration", "обязателен для секундомера без видео-фона")
+
+        if self.position not in POSITIONS:
+            fail("position", "ожидается одно из: " + ", ".join(POSITIONS))
+
+        if not 8 <= self.font_size <= 500:
+            fail("font_size", "должен быть от 8 до 500")
+
+        if not _is_valid_color(self.color):
+            fail("color", color_problem)
+
+        if self.hold_seconds < 0:
+            fail("hold_seconds", "не может быть меньше 0")
+
+        if not _is_valid_color(self.hold_color):
+            fail("hold_color", color_problem)
+
+        if not 1 <= self.fps <= 120:
+            fail("fps", "должен быть от 1 до 120")
 
     # since: v0.1 (FR-20), выбор по контейнеру — v0.2 (FR-21)
     def resolved_encoder(self) -> str:
@@ -203,7 +308,7 @@ class TimerConfig:
             TimerConfig(output=Path("a.mp4")).resolved_encoder()
             # "libx264"
         """
-        raise NotImplementedError
+        return "libx264"
 
     # since: v0.1 (FR-11, FR-12)
     def known_total_duration(self) -> float | None:
@@ -231,4 +336,8 @@ class TimerConfig:
             cfg.known_total_duration()
             # 15.0
         """
-        raise NotImplementedError
+        if self.background is not None:
+            return self.duration
+        if self.mode == "countdown":
+            return self.countdown_seconds + self.hold_seconds
+        return self.duration

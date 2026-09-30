@@ -1,8 +1,8 @@
 """Общие фикстуры тестов.
 
-На этапе каркаса (SDD, этап 3) фикстуры объявлены, но не реализованы:
-тесты красные, а не пропущенные. Реализуются вместе с кодом по критериям
-приёмки из `specs/v0.1.md`.
+Фикстуры реализованы вместе с `TimerConfig.validate()` (30.09, критерий A7):
+тесты конфигурации могут собирать минимальный корректный рендер и менять в
+нём одно поле, не завися от ffmpeg.
 """
 
 from __future__ import annotations
@@ -10,6 +10,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+
+from video_timer.config import TimerConfig
 
 
 @pytest.fixture
@@ -28,21 +30,20 @@ def tmp_output(tmp_path: Path) -> Path:
         Путь к несуществующему файлу `.mp4` внутри `tmp_path`.
 
     Raises:
-        NotImplementedError: фикстура-заготовка, тело появится вместе с
-            реализацией рендера.
+        Не бросает исключений.
     """
-    raise NotImplementedError("не реализовано: фикстура tmp_output")
+    return tmp_path / "out.mp4"
 
 
 @pytest.fixture
-def base_cfg(tmp_output: Path):
+def base_cfg(tmp_output: Path) -> TimerConfig:
     """Вернуть минимальную корректную конфигурацию для рендера.
 
     Спека: критерии A1, A2, FR-40. Версия: v0.1.
 
-    Ожидаемое состояние: сплошной чёрный фон, секундомер, разрешение
-    `1280x720`, `30` fps, выход — `tmp_output`. От неё отталкиваются тесты
-    ошибок, меняя одно поле.
+    Состояние: сплошной чёрный фон, секундомер, `duration` задан (обязателен
+    для секундомера без видео-фона, FR-12), выход — `tmp_output`. От неё
+    отталкиваются тесты ошибок, меняя одно поле.
 
     Args:
         tmp_output: путь выходного файла из фикстуры выше.
@@ -51,7 +52,6 @@ def base_cfg(tmp_output: Path):
         `TimerConfig`, который проходит `TimerConfig.validate()`.
 
     Raises:
-        NotImplementedError: фикстура-заготовка, тело появится вместе с
-            `TimerConfig`.
+        Не бросает исключений.
     """
-    raise NotImplementedError("не реализовано: фикстура base_cfg")
+    return TimerConfig(output=tmp_output, duration=8.0)
