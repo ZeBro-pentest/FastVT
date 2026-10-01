@@ -7,3 +7,6 @@ dependencies = []
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "integration: гоняет настоящий ffmpeg, пропускается если его нет (FR-55)",
+]

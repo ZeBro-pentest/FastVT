@@ -13,6 +13,8 @@
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 from pathlib import Path
 
 
@@ -54,7 +56,11 @@ def find_ffmpeg() -> Path | None:
         find_ffmpeg()
         # Path("/usr/bin/ffmpeg")
     """
-    raise NotImplementedError
+    for name in _PROGRAM_NAMES["ffmpeg"]:
+        found = _which(name)
+        if found:
+            return Path(found)
+    return None
 
 
 # since: v0.1 (FR-11, FR-55)
@@ -70,7 +76,34 @@ def find_ffprobe() -> Path | None:
     Returns:
         Путь к ffprobe или ``None``, если не найден.
     """
-    raise NotImplementedError
+    for name in _PROGRAM_NAMES["ffprobe"]:
+        found = _which(name)
+        if found:
+            return Path(found)
+    return None
+
+
+# since: v0.1 (FR-06, FR-11)
+_PROGRAM_NAMES: dict[str, tuple[str, ...]] = {
+    "ffmpeg": ("ffmpeg", "ffmpeg.exe"),
+    "ffprobe": ("ffprobe", "ffprobe.exe"),
+}
+"""Имена исполняемых файлов: сначала без расширения, затем с `.exe` для Windows."""
+
+
+# since: v0.1 (FR-55)
+def _which(name: str) -> str:
+    """Найти программу в `PATH`, отдельно от возможности подменить поиск в тестах.
+
+    Спека: FR-55, FR-11. Версия: v0.1.
+
+    Args:
+        name: имя программы без пути.
+
+    Returns:
+        Полный путь к программе или пустая строка, если не найдена.
+    """
+    return shutil.which(name) or ""
 
 
 # since: v0.1 (FR-06)
@@ -94,7 +127,108 @@ def default_font() -> Path | None:
         default_font()
         # Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
     """
-    raise NotImplementedError
+    for directory in _font_dirs():
+        if not directory.is_dir():
+            continue
+        for name in _FONT_NAMES:
+            candidate = directory / name
+            if candidate.is_file():
+                return candidate
+        for name in _FONT_NAMES:
+            for candidate in sorted(directory.rglob(name)):
+                if candidate.is_file():
+                    return candidate
+    return None
+
+
+# since: v0.1 (FR-06)
+_FONT_NAMES: tuple[str, ...] = (
+    "DejaVuSans.ttf",
+    "LiberationSans-Regular.ttf",
+    "arial.ttf",
+    "Arial.ttf",
+    "Helvetica.ttc",
+)
+"""Имена файлов шрифтов в порядке предпочтения, одинаковом для трёх систем."""
+
+
+# since: v0.1 (FR-06)
+def _font_dirs() -> tuple[Path, ...]:
+    """Перечислить каталоги, где ищется системный шрифт.
+
+    Спека: FR-06. Версия: v0.1.
+
+    Порядок каталогов соответствует порядку систем в спецификации 7.6.
+    Каталоги, которых нет в системе, всё равно возвращаются: проверка
+    существования делается в :func:`default_font`.
+
+    Returns:
+        Кортеж путей к каталогам шрифтов.
+
+    Пример:
+        _font_dirs()
+        # (Path("/usr/share/fonts"),)
+    """
+    return (
+        Path("C:/Windows/Fonts"),
+        Path("/System/Library/Fonts"),
+        Path("/Library/Fonts"),
+        Path("/usr/share/fonts"),
+        Path("/usr/local/share/fonts"),
+        Path.home() / ".fonts",
+        Path.home() / ".local/share/fonts",
+    )
+
+
+# since: v0.1 (FR-20)
+def available_h264_encoder() -> str | None:
+    """Найти в этой сборке ffmpeg любой кодировщик H.264.
+
+    Спека: FR-20. Версия: v0.1.
+
+    Нужна тестам сборки цепочки фильтров и как страховка на время перехода
+    между разными сборками ffmpeg: `libx264` есть не везде, и проверять таймер
+    на устаревшем кодировщике бессмысленно — с ним кадр может и не собраться.
+
+    Args:
+        Нет.
+
+    Returns:
+        Имя кодировщика из :data:`_H264_FALLBACKS` либо ``None``, если в сборке
+            ffmpeg нет ни одного.
+
+    Пример:
+        available_h264_encoder()
+        # "libopenh264"
+    """
+    ffmpeg = find_ffmpeg()
+    if ffmpeg is None:
+        return None
+
+    finished = subprocess.run(
+        [str(ffmpeg), "-hide_banner", "-encoders"], capture_output=True, text=True
+    )
+    if finished.returncode != 0:
+        return None
+
+    for line in finished.stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[1] in _H264_FALLBACKS:
+            return parts[1]
+    return None
+
+
+# since: v0.1 (FR-20)
+_H264_FALLBACKS: tuple[str, ...] = (
+    "libx264",
+    "libopenh264",
+    "h264_qsv",
+    "h264_v4l2m2m",
+    "h264_vaapi",
+    "h264_nvenc",
+    "h264_amf",
+)
+"""Кодировщики H.264 в порядке предпочтения, если основной недоступен."""
 
 
 # since: v0.2 (FR-54)
