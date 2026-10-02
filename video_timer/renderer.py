@@ -14,16 +14,42 @@
 
 from __future__ import annotations
 
+import subprocess
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from video_timer import osutil
+from video_timer.background import Background
 from video_timer.config import TimerConfig, VideoTimerError
+from video_timer.filters import FilterBuilder
 
 # since: v0.1 (NFR-04)
 LOG_TAIL_LINES: int = 50
 """Сколько последних строк лога ffmpeg хранятся в памяти (NFR-04)."""
+
+# since: v0.1 (FR-42, NFR-04)
+_MAX_LOG_LINES: int = 5
+"""Сколько последних строк лога ffmpeg попадает в сообщение об ошибке (FR-42).
+
+Причина ошибки всегда в самом конце: ffmpeg печатает её последней строкой.
+Брать больше строк нельзя — выше лежит баннер со списком кодеков на
+несколько тысяч символов, и в сообщении вместо ошибки пользователь увидит
+перечень возможностей сборки. Полный хвост остаётся в `RenderResult.tail_log`.
+"""
+
+# since: v0.1 (FR-42, NFR-04)
+_MAX_LOG_CHARS: int = 500
+"""Предел длины текста, который дописывается в сообщение об ошибке (FR-42).
+
+Последние строки могут быть длинными путями или названиями параметров;
+сообщение в GUI должно помещаться в несколько строк статуса.
+"""
+
+# since: v0.1 (FR-20)
+_X264: str = "libx264"
+"""Кодек, для которого в команде добавляются CRF и preset (FR-20, FR-23)."""
 
 
 @dataclass
@@ -51,7 +77,7 @@ class RenderCancelled(VideoTimerError):
 
     Спека: FR-51. Версия: v0.2.
 
-    Отдельный класс, чтобы GUI отличил отмену от ошибки: не показывает
+    Отдельный класс, чтобы GUI отличил отмену от ошибки: не показывать
     красное сообщение, а просто возвращает панель в исходное состояние.
     """
 
@@ -77,6 +103,10 @@ class FFmpegRenderer:
 
         Спека: FR-55. Версия: v0.1.
 
+        ffmpeg ищется при создании объекта, а не при запуске: без него
+        рендер всё равно невозможен, а GUI должен показать сообщение сразу
+        при нажатии «Рендерить», а не через несколько секунд ожидания.
+
         Args:
             cfg: конфигурация рендера.
 
@@ -85,7 +115,18 @@ class FFmpegRenderer:
                 ни в папке portable-сборки, ни в `PATH`; текст содержит
                 инструкцию по установке (FR-55).
         """
-        raise NotImplementedError
+        ffmpeg = osutil.find_ffmpeg()
+        if ffmpeg is None:
+            raise VideoTimerError(
+                "ffmpeg: не найден в системе. Установите ffmpeg "
+                "и перезапустите программу"
+            )
+        self.cfg = cfg
+        self.ffmpeg = ffmpeg
+        self.background = Background(cfg)
+        self.filters = FilterBuilder(cfg, self.background)
+        self._cancelled = False
+        self._process: subprocess.Popen[str] | None = None
 
     # since: v0.1 (FR-13, FR-20, FR-23)
     def build_command(self) -> list[str]:
@@ -105,6 +146,9 @@ class FFmpegRenderer:
 
         В v0.1 аудиокодек не добавляется: звук в версию не входит.
 
+        CRF и preset добавляются только для libx264: у других кодеков таких
+        опций нет, и ffmpeg отверг бы команду целиком.
+
         Returns:
             Список аргументов, готовый для `subprocess.Popen`.
 
@@ -116,7 +160,22 @@ class FFmpegRenderer:
             cmd = FFmpegRenderer(cfg).build_command()
             # ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=...", ...]
         """
-        raise NotImplementedError
+        encoder = self.cfg.resolved_encoder()
+        command = [
+            str(self.ffmpeg),
+            "-y",
+            *self.background.input_args(),
+            "-filter_complex",
+            ",".join(self.filters.build()),
+            "-c:v",
+            encoder,
+        ]
+        if encoder == _X264:
+            command.extend(
+                ["-crf", str(self.cfg.crf), "-preset", self.cfg.preset]
+            )
+        command.extend(["-r", str(self.cfg.fps), str(self.cfg.output)])
+        return command
 
     # since: v0.1 (FR-51, NFR-04, NFR-05)
     def run(
@@ -124,17 +183,21 @@ class FFmpegRenderer:
     ) -> RenderResult:
         """Запустить ffmpeg и дождаться завершения, отдавая прогресс.
 
-        Спека: FR-51, NFR-02, NFR-04, NFR-42. Версия: v0.1 (прогресс),
-        v0.2 (отмена).
+        Спека: FR-51, NFR-02, NFR-04, FR-42, FR-41. Версия: v0.1 (прогресс,
+        папка результата), v0.2 (отмена).
 
         Поток ffmpeg читается построчно, а не через `communicate()`: иначе
         длинный лог съедает память, а прогрессбар не двигается. Хранится
         не более :data:`LOG_TAIL_LINES` последних строк.
 
-        Поток с `-progress pipe:2` разбирается построчно, из строк `out_time_ms`
-        и `total_size` считается доля прогресса. Если общая длительность
+        Поток с `-progress pipe:2` разбирается построчно, из строк `out_time_us`
+        и `progress` считается доля прогресса. Если общая длительность
         неизвестна, второй аргумент колбэка равен ``None`` — GUI покажет
         неопределённый индикатор.
+
+        Перед запуском создаётся папка результата (`FR-41`): пользователь
+        вводит путь и получает файл там, куда попросил, вместо сообщения
+        про ffmpeg.
 
         Args:
             on_progress: колбэк ``(доля_0..1, всего_секунд)``, вызывается в
@@ -148,14 +211,71 @@ class FFmpegRenderer:
         Raises:
             RenderCancelled: если до или во время работы вызвана `cancel()`
                 (FR-51, v0.2).
-            VideoTimerError: `render: ffmpeg завершился с ошибкой` — код
-                возврата ненулевой; в конце текста — хвост лога для
-                диагностики, но не весь (FR-42, NFR-04).
+            VideoTimerError: `output: не удалось создать папку <путь>` — папка
+                результата не создалась (FR-41); либо `render: ffmpeg завершился
+                с ошибкой`, если код возврата ненулевой, и в конце текста —
+                хвост лога для диагностики, но не весь (FR-42, NFR-04).
 
         Пример:
             FFmpegRenderer(cfg).run(lambda done, total: print(f"{done:.0%}"))
         """
-        raise NotImplementedError
+        if self._cancelled:
+            raise RenderCancelled("render: остановлен до запуска")
+
+        total = self.cfg.known_total_duration()
+        tail = _new_log_tail()
+        last_seconds: float | None = None
+
+        _make_output_dir(self.cfg.output)
+
+        command = self.build_command()[:-1] + [
+            "-progress",
+            "pipe:2",
+            "-nostats",
+            str(self.cfg.output),
+        ]
+
+        self._process = subprocess.Popen(
+            command,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+
+        assert self._process.stderr is not None
+        for line in self._process.stderr:
+            line = line.rstrip("\n")
+            if not line:
+                continue
+            tail.append(line)
+
+            seconds = _progress_seconds(line)
+            if seconds is not None:
+                last_seconds = seconds
+                if on_progress is not None and total:
+                    on_progress(min(1.0, seconds / total), total)
+            elif line.startswith("progress=end") and on_progress is not None:
+                on_progress(1.0, total)
+
+        returncode = self._process.wait()
+        self._process = None
+
+        if self._cancelled:
+            raise RenderCancelled("render: остановлен")
+
+        if returncode != 0:
+            raise VideoTimerError(
+                "render: ffmpeg завершился с ошибкой. "
+                + _tail_for_message(tail)
+            )
+
+        return RenderResult(
+            output=self.cfg.output,
+            duration_seconds=last_seconds or total,
+            tail_log="\n".join(tail),
+        )
 
     # since: v0.2 (FR-51)
     def cancel(self) -> None:
@@ -202,7 +322,38 @@ def render(
         result = render(cfg)
         print(result.output)
     """
-    raise NotImplementedError
+    cfg.validate()
+    return FFmpegRenderer(cfg).run(on_progress)
+
+
+# since: v0.1 (FR-41)
+def _make_output_dir(output: Path) -> None:
+    """Создать папку результата вместе с промежуточными каталогами.
+
+    Спека: FR-41. Версия: v0.1.
+
+    `TimerConfig.validate()` работает без побочных эффектов, поэтому папку
+    создаёт рендер. Без этого ffmpeg падает с `No such file or directory`, а
+    пользователю показывается сообщение про ffmpeg вместо его собственного
+    поля `output`.
+
+    Args:
+        output: путь будущего файла, его родительская папка создаётся.
+
+    Returns:
+        Ничего.
+
+    Raises:
+        VideoTimerError: `output: не удалось создать папку <путь>: <причина>` —
+            нет прав на запись или путь занят файлом (FR-41, FR-42).
+    """
+    parent = output.parent
+    try:
+        parent.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        raise VideoTimerError(
+            f"output: не удалось создать папку {parent}: {error.strerror or error}"
+        ) from None
 
 
 # since: v0.1 (NFR-04)
@@ -214,4 +365,67 @@ def _new_log_tail() -> deque[str]:
     Returns:
         Пустую `deque` с максимальной длиной :data:`LOG_TAIL_LINES`.
     """
-    raise NotImplementedError
+    return deque(maxlen=LOG_TAIL_LINES)
+
+
+# since: v0.1 (FR-51)
+def _progress_seconds(line: str) -> float | None:
+    """Достать прошедшее время рендера из строки `-progress pipe:2`.
+
+    Спека: FR-51. Версия: v0.1.
+
+    ffmpeg пишет `out_time_us` (микросекунды) и `out_time_ms` — историческое
+    имя поля, но значение тоже в микросекундах. Берётся `out_time_us`, если
+    он есть, иначе `out_time_ms`.
+
+    Args:
+        line: одна строка вывода `-progress` без перевода строки.
+
+    Returns:
+        Прошедшие секунды или ``None``, если строка не содержит времени.
+
+    Raises:
+        Не бросает исключений.
+    """
+    for key in ("out_time_us", "out_time_ms"):
+        prefix = f"{key}="
+        if line.startswith(prefix):
+            try:
+                return int(line[len(prefix):]) / 1_000_000
+            except ValueError:
+                return None
+    return None
+
+
+# since: v0.1 (FR-42, NFR-04)
+def _tail_for_message(tail: deque[str]) -> str:
+    """Собрать короткий хвост лога для сообщения об ошибке.
+
+    Спека: FR-42, NFR-04. Версия: v0.1.
+
+    Берутся последние :data:`_MAX_LOG_LINES` строк: причина ошибки в ffmpeg
+    всегда в самом конце вывода, а до неё лежит баннер сборки — перечень
+    кодеков и версий библиотек, который пользователю ничего не говорит.
+    Полный хвост остаётся в `RenderResult.tail_log` для журнала GUI (FR-53).
+
+    Args:
+        tail: накопленные строки лога, не более :data:`LOG_TAIL_LINES`.
+
+    Returns:
+        Текст для конца сообщения: непустая строка либо «подробности в логе»,
+            если лог был пуст.
+
+    Raises:
+        Не бросает исключений.
+
+    Пример:
+        _tail_for_message(deque(["стар", "финал"], maxlen=50))
+        # "стар\\nфинал"
+    """
+    lines = [line for line in list(tail)[-_MAX_LOG_LINES:] if line.strip()]
+    if not lines:
+        return "Подробности в логе ffmpeg"
+    text = "\n".join(lines)
+    if len(text) > _MAX_LOG_CHARS:
+        text = "…" + text[-_MAX_LOG_CHARS:]
+    return text

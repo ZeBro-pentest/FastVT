@@ -5,8 +5,7 @@
 `TimerConfig.validate()` (`SPEC.md` 7.1, `specs/v0.1.md`).
 
 Часть критерия A7 про код возврата CLI (день 03.10) и подсветку поля в GUI
-(день 05.10), а `test_output_parent_dir_created` — про рендер (день 02.10).
-Эти тесты оставлены красными намеренно, с указанием дня в docstring.
+(день 05.10) оставлена красной намеренно, с указанием дня в docstring.
 """
 
 from __future__ import annotations
@@ -121,13 +120,25 @@ def test_output_extension_must_be_mp4(base_cfg: TimerConfig, suffix: str) -> Non
         cfg.validate()
 
 
-def test_output_parent_dir_created(base_cfg: TimerConfig, tmp_path: Path) -> None:
-    """Отсутствующая папка вывода создаётся или даёт понятную ошибку.
+def test_validate_does_not_create_output_dir(base_cfg: TimerConfig) -> None:
+    """`validate()` не создаёт папку результата — это делает `renderer`.
 
-    Папку результата создаёт `renderer` (день 02.10); `validate()` работает
-    без побочных эффектов, поэтому тест закрывается вместе с рендером.
+    Спека: FR-41, NFR-01. Версия: v0.1.
+
+    Проверка без побочных эффектов: если бы `validate()` создавал папку, то
+    отказ конфигурации по другой причине оставлял бы на диске пустой каталог.
+    Создание папки проверяет `tests/test_renderer.py::test_output_parent_dir_created`.
+
+    Args:
+        base_cfg: валидная конфигурация из фикстуры.
     """
-    pytest.fail("не реализовано: FR-41 — понятная ошибка для output (день 02.10)")
+    output = base_cfg.output.parent / "не-должно-появиться" / "out.mp4"
+    cfg = replace(base_cfg, output=output, font_size=0)
+
+    with pytest.raises(VideoTimerError, match=r"^font-size: "):
+        cfg.validate()
+
+    assert not output.parent.exists()
 
 
 def test_background_must_exist(base_cfg: TimerConfig) -> None:
