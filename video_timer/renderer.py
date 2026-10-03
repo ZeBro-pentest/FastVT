@@ -29,6 +29,10 @@ from video_timer.filters import FilterBuilder
 LOG_TAIL_LINES: int = 50
 """Сколько последних строк лога ffmpeg хранятся в памяти (NFR-04)."""
 
+# since: v0.1 (NFR-05)
+_STOP_TIMEOUT_SECONDS: float = 5.0
+"""Сколько ждать завершения ffmpeg после `terminate()`, прежде чем убить (NFR-05)."""
+
 # since: v0.1 (FR-42, NFR-04)
 _MAX_LOG_LINES: int = 5
 """Сколько последних строк лога ffmpeg попадает в сообщение об ошибке (FR-42).
@@ -235,31 +239,44 @@ class FFmpegRenderer:
             str(self.cfg.output),
         ]
 
-        self._process = subprocess.Popen(
-            command,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
+        try:
+            self._process = subprocess.Popen(
+                command,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+        except OSError as error:
+            raise VideoTimerError(
+                f"render: не удалось запустить ffmpeg: {error.strerror or error}"
+            ) from None
 
-        assert self._process.stderr is not None
-        for line in self._process.stderr:
-            line = line.rstrip("\n")
-            if not line:
-                continue
-            tail.append(line)
+        process = self._process
+        assert process.stderr is not None
+        try:
+            for line in process.stderr:
+                line = line.rstrip("\n")
+                if not line:
+                    continue
+                tail.append(line)
 
-            seconds = _progress_seconds(line)
-            if seconds is not None:
-                last_seconds = seconds
-                if on_progress is not None and total:
-                    on_progress(min(1.0, seconds / total), total)
-            elif line.startswith("progress=end") and on_progress is not None:
-                on_progress(1.0, total)
+                seconds = _progress_seconds(line)
+                if seconds is not None:
+                    last_seconds = seconds
+                    if on_progress is not None and total:
+                        on_progress(min(1.0, seconds / total), total)
+                elif line.startswith("progress=end") and on_progress is not None:
+                    on_progress(1.0, total)
+        except BaseException:
+            # Колбэк прогресса приходит из GUI и может упасть. Без этой
+            # ветки ffmpeg остался бы работать: цикл вышел бы мимо `wait()`,
+            # а процесс продолжил бы писать в переполненный канал (NFR-05).
+            _stop_process(process)
+            raise
 
-        returncode = self._process.wait()
+        returncode = process.wait()
         self._process = None
 
         if self._cancelled:
@@ -273,7 +290,7 @@ class FFmpegRenderer:
 
         return RenderResult(
             output=self.cfg.output,
-            duration_seconds=last_seconds or total,
+            duration_seconds=_rendered_duration(last_seconds, total),
             tail_log="\n".join(tail),
         )
 
@@ -356,6 +373,36 @@ def _make_output_dir(output: Path) -> None:
         ) from None
 
 
+# since: v0.1 (NFR-05)
+def _stop_process(process: subprocess.Popen) -> None:
+    """Завершить процесс ffmpeg, если рендер прервался изнутри.
+
+    Спека: NFR-05. Версия: v0.1.
+
+    Нужен там, где `run()` выходит по исключению, а `wait()` не был вызван:
+    процесс остался бы работать, продолжая писать в канал, который никто
+    больше не читает. Сначала `terminate()` — ffmpeg успевает закрыть файл
+    корректно; если не послушал, добиваем `kill()`.
+
+    Args:
+        process: запущенный процесс ffmpeg.
+
+    Returns:
+        Ничего. Исключения не бросаются: сбой уже происходит, и его нельзя
+        заменять ошибкой завершения.
+    """
+    if process.poll() is not None:
+        return
+    try:
+        process.terminate()
+        process.wait(timeout=_STOP_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+    except OSError:
+        pass
+
+
 # since: v0.1 (NFR-04)
 def _new_log_tail() -> deque[str]:
     """Создать очередь для хранения хвоста лога ffmpeg.
@@ -366,6 +413,25 @@ def _new_log_tail() -> deque[str]:
         Пустую `deque` с максимальной длиной :data:`LOG_TAIL_LINES`.
     """
     return deque(maxlen=LOG_TAIL_LINES)
+
+
+# since: v0.1 (FR-11, FR-12)
+def _rendered_duration(last_seconds: float | None, total: float | None) -> float | None:
+    """Определить длительность ролика по последнему отсчёту ffmpeg.
+
+    Спека: FR-11, FR-12. Версия: v0.1.
+
+    Args:
+        last_seconds: последнее значение `out_time_us` из `-progress`, `None`
+            если ffmpeg не успел ничего отдать.
+        total: плановая длительность из `TimerConfig.known_total_duration()`,
+            `None` если она неизвестна.
+
+    Returns:
+        Фактический хронометраж, а если его нет — плановый; `None`, если
+        неизвестны оба.
+    """
+    return last_seconds if last_seconds is not None else total
 
 
 # since: v0.1 (FR-51)

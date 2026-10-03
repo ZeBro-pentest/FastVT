@@ -27,6 +27,8 @@ from video_timer.renderer import (
     RenderCancelled,
     _new_log_tail,
     _progress_seconds,
+    _rendered_duration,
+    _stop_process,
     render,
 )
 
@@ -560,6 +562,182 @@ def test_missing_ffmpeg_raises_readable_error(
     message = str(caught.value)
     assert message.startswith("ffmpeg:")
     assert "установ" in message.lower()
+
+
+def test_ffmpeg_start_failure_gives_readable_error(
+    base_cfg: TimerConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FR-42: не удалось запустить ffmpeg — сообщение, а не `OSError` в трейсбеке.
+
+    ffmpeg ищется в конструкторе, но между поиском и запуском он может
+    исчезнуть, оказаться неисполняемым или сбиться `PATH`. Тогда `Popen`
+    бросает `OSError`, и пользователь получил бы голый трейсбек.
+
+    Args:
+        base_cfg: валидная конфигурация из фикстуры.
+        monkeypatch: фикстура pytest для подмены `subprocess.Popen`.
+    """
+
+    def refusing_popen(*args: object, **kwargs: object) -> object:
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(subprocess, "Popen", refusing_popen)
+
+    with pytest.raises(VideoTimerError) as caught:
+        render(base_cfg)
+
+    message = str(caught.value)
+    assert message.startswith("render:"), message
+    assert "Traceback" not in message
+
+
+def test_progress_callback_error_stops_ffmpeg(
+    base_cfg: TimerConfig, h264: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Исключение из `on_progress` не оставляет ffmpeg работать в фоне.
+
+    Спека: NFR-05, FR-42. Версия: v0.1.
+
+    Колбэк приходит из GUI. Если он бросит исключение, чтение лока прервётся
+    мимо `wait()`, и процесс ffmpeg останется жив: он продолжает писать в
+    переполненный канал, а пользователь уже не может его остановить. Поэтому
+    рендер обязан завершить процесс перед тем, как отдать исключение наверх.
+
+    Args:
+        base_cfg: валидная конфигурация из фикстуры.
+        h264: имя доступного кодировщика H.264, см. фикстуру `h264`.
+        monkeypatch: фикстура pytest для подмены `subprocess.Popen`.
+    """
+    base_cfg.duration = 30.0
+    started: list[subprocess.Popen] = []
+    real_popen = subprocess.Popen
+
+    def watching_popen(*args: object, **kwargs: object) -> subprocess.Popen:
+        process = real_popen(*args, **kwargs)  # type: ignore[arg-type]
+        started.append(process)
+        return process
+
+    def broken_callback(_done: float, _total: float | None) -> None:
+        raise RuntimeError("очередь GUI закрыта")
+
+    monkeypatch.setattr(subprocess, "Popen", watching_popen)
+
+    with pytest.raises(RuntimeError, match="очередь GUI закрыта"):
+        render(base_cfg, broken_callback)
+
+    assert started, "ffmpeg должен был запуститься"
+    assert started[0].poll() is not None, "ffmpeg остался работать после сбоя колбэка"
+    assert started[0].returncode != 0, (
+        "ffmpeg должен быть прерван, а не доработать ролик до конца"
+    )
+
+
+def test_render_duration_is_zero_not_planned_total() -> None:
+    """Нулевой фактический хронометраж не подменяется плановой длительностью.
+
+    Спека: FR-11, FR-12. Версия: v0.1.
+
+    `0.0 or total` в Python даёт `total`, поэтому ролик, который ffmpeg
+    отсчитал как ноль секунд, отчитался бы плановым `duration`. GUI показывает
+    это значение как результат, значит подмена неверна.
+
+    Args:
+        Нет.
+    """
+    assert _rendered_duration(0.0, 30.0) == 0.0
+    assert _rendered_duration(None, 30.0) == 30.0
+    assert _rendered_duration(7.5, 30.0) == 7.5
+    assert _rendered_duration(None, None) is None
+
+
+class _StubProcess:
+    """Процесс, который можно попросить завершиться, а можно и нельзя.
+
+    Спека: NFR-05. Версия: v0.1.
+
+    Настоящий ffmpeg ведёт себя как `ignore_terminate=False`: после
+    `terminate()` он выходит. Настоящий зависший процесс вёл бы себя как
+    `ignore_terminate=True` и потребовал бы `kill()`. Заглушка нужна, чтобы
+    проверить обе ветви без ffmpeg и без ожидания реального таймаута.
+    """
+
+    def __init__(self, ignore_terminate: bool = False, running: bool = True) -> None:
+        """Запомнить, как заглушка должна себя вести.
+
+        Args:
+            ignore_terminate: если `True`, `wait()` после `terminate()`
+                бросает `subprocess.TimeoutExpired` вместо нормального выхода.
+            running: если `False`, процесс уже завершён.
+        """
+        self.calls: list[str] = []
+        self._ignore_terminate = ignore_terminate
+        self._running = running
+        self._terminated = False
+        self._killed = False
+
+    def poll(self) -> int | None:
+        """Сообщить, жив ли процесс: пока `running`, жив.
+
+        Returns:
+            `None`, если процесс ещё работает, иначе код выхода.
+        """
+        return None if self._running else 0
+
+    def terminate(self) -> None:
+        """Запросить мягкое завершение, как это делает `Popen.terminate()`."""
+        self.calls.append("terminate")
+        self._terminated = True
+
+    def kill(self) -> None:
+        """Запросить жёсткое завершение, как это делает `Popen.kill()`."""
+        self.calls.append("kill")
+        self._killed = True
+
+    def wait(self, timeout: float | None = None) -> int:
+        """Дождаться завершения или сообщить, что процесс не послушался.
+
+        Args:
+            timeout: время ожидания, прокидывается в `TimeoutExpired`.
+
+        Returns:
+            Код выхода `0`.
+
+        Raises:
+            subprocess.TimeoutExpired: если процесс запросили завершить, но он
+                игнорирует — `kill()` не игнорируют никогда.
+        """
+        self.calls.append("wait")
+        if self._terminated and self._ignore_terminate and not self._killed:
+            raise subprocess.TimeoutExpired(cmd="ffmpeg", timeout=timeout)
+        return 0
+
+
+def test_stop_process_kills_unresponsive_ffmpeg() -> None:
+    """Процесс, игнорирующий `terminate()`, добивается `kill()` (NFR-05)."""
+    process = _StubProcess(ignore_terminate=True)
+
+    _stop_process(process)  # type: ignore[arg-type]
+
+    assert process.calls == ["terminate", "wait", "kill", "wait"]
+
+
+def test_stop_process_is_gentle_when_possible() -> None:
+    """Послушный процесс завершается без `kill()` (NFR-05)."""
+    process = _StubProcess()
+
+    _stop_process(process)  # type: ignore[arg-type]
+
+    assert "kill" not in process.calls
+    assert process.calls[0] == "terminate"
+
+
+def test_stop_process_does_nothing_when_already_exited() -> None:
+    """Завершившийся процесс не трогается (NFR-05)."""
+    process = _StubProcess(running=False)
+
+    _stop_process(process)  # type: ignore[arg-type]
+
+    assert process.calls == []
 
 
 def test_cancel_stops_running_ffmpeg(base_cfg: TimerConfig) -> None:
