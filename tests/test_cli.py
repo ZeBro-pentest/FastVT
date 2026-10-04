@@ -11,7 +11,28 @@ from pathlib import Path
 
 import pytest
 
-from video_timer.cli import build_parser, main
+from video_timer.cli import _config_from_args, build_parser, main
+from video_timer.config import TimerConfig
+
+
+def test_countdown_default_matches_config_and_spec() -> None:
+    """Без `--countdown-seconds` отсчёт идёт 60 с, как в `TimerConfig` и спеке.
+
+    Спека: FR-02, FR-50. Версия: v0.1.
+
+    Умолчание CLI не должно расходиться с таблицей параметров
+    `specs/v0.1.md` и с полем `TimerConfig.countdown_seconds`: иначе одна и
+    та же команда из CLI и из GUI делает ролики разной длительности. При
+    `countdown_seconds=60` и `hold_seconds=5` результат длится 65 с (FR-12).
+    """
+    spec_default = TimerConfig(output=Path("out.mp4")).countdown_seconds
+    cfg = _config_from_args(
+        build_parser().parse_args(["-o", "out.mp4", "--mode", "countdown"])
+    )
+
+    assert spec_default == 60.0
+    assert cfg.countdown_seconds == spec_default
+    assert cfg.known_total_duration() == 65.0
 
 
 def test_a7_exit_code_1_on_font_size_zero(capsys: pytest.CaptureFixture) -> None:

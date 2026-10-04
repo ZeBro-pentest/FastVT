@@ -13,10 +13,12 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 from video_timer import __version__
-from video_timer.config import TimerConfig
+from video_timer.config import TimerConfig, VideoTimerError
+from video_timer.renderer import render
 
 
 # since: v0.1 (FR-50), `--estimate-only` и `--verbose` — v0.2
@@ -39,55 +41,159 @@ def build_parser() -> argparse.ArgumentParser:
         args.mode
         # "countdown"
     """
-    raise NotImplementedError
+    parser = argparse.ArgumentParser(
+        prog="video_timer.cli",
+        description="Генератор видео-таймера для наложения секундомера или обратного отсчёта",
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=str,
+        required=True,
+        metavar="ПУТЬ",
+        help="Путь к выходному MP4 (обязателен)",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["stopwatch", "countdown"],
+        default="stopwatch",
+        help="Режим: stopwatch или countdown (по умолчанию stopwatch)",
+    )
+    parser.add_argument(
+        "-b",
+        "--background",
+        type=str,
+        default=None,
+        help="Фон: сплошной цвет или путь к видео/картинке (опц.)",
+    )
+    parser.add_argument(
+        "--bg-color",
+        dest="bg_color",
+        type=str,
+        default="black",
+        help="Цвет фона, если не задано видео",
+    )
+    parser.add_argument(
+        "--duration",
+        type=float,
+        default=None,
+        help="Длительность рендера в секундах (опц.)",
+    )
+    parser.add_argument(
+        "--position",
+        type=str,
+        default="br",
+        help="Позиция таймера (по умолчанию br)",
+    )
+    parser.add_argument(
+        "--font-size",
+        dest="font_size",
+        type=int,
+        default=64,
+        help="Размер шрифта",
+    )
+    parser.add_argument(
+        "--color",
+        type=str,
+        default="white",
+        help="Цвет текста",
+    )
+    parser.add_argument(
+        "--countdown-seconds",
+        dest="countdown_seconds",
+        type=float,
+        default=60.0,
+        help="Длительность обратного отсчёта в секундах (по умолчанию 60)",
+    )
+    parser.add_argument(
+        "--hold-seconds",
+        dest="hold_seconds",
+        type=float,
+        default=5.0,
+        help="Длительность hold-паузы",
+    )
+    parser.add_argument(
+        "--hold-color",
+        dest="hold_color",
+        type=str,
+        default="#e6362c",
+        help="Цвет текста в hold-паузе",
+    )
+    parser.add_argument(
+        "--fps",
+        type=int,
+        default=30,
+        help="Частота кадров",
+    )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    return parser
 
 
-# since: v0.1 (FR-50)
-def main(argv: list[str] | None = None) -> int:
-    """Точка входа CLI: разобрать аргументы, отрендерить, вернуть код.
-
-    Спека: FR-42, FR-50. Версия: v0.1 (рендер), v0.2 (`--estimate-only`,
-    `--verbose`).
-
-    Все сообщения об ошибках печатаются в `stderr` без трейсбека (FR-42);
-    пользователь видит только «поле: что не так». `--help` и `--version`
-    обрабатываются `argparse` и дают код 0.
-
-    Args:
-        argv: аргументы командной строки; ``None`` — читаются из `sys.argv`.
-
-    Returns:
-        0 при успехе, 1 при ошибке валидации или рендера, 2 при неверных
-        аргументах.
-
-    Пример:
-        python -m video_timer.cli -o out.mp4 --mode countdown --countdown-seconds 10
-    """
-    raise NotImplementedError
-
-
-# since: v0.1 (FR-50)
 def _config_from_args(args: argparse.Namespace) -> TimerConfig:
     """Преобразовать разобранные аргументы в `TimerConfig`.
 
     Спека: FR-50. Версия: v0.1.
 
-    Единственное место, где строки превращаются в типы: `Path`, `int`,
-    `float`. Приведения типов заданы в `build_parser()`, здесь остаётся
-    только сборка объекта и приведение `background` к `Path | None`.
+    Значения опций, не переданные пользователем, берутся из `TimerConfig`:
+    аргументы `default=` в `build_parser()` и `getattr`-подстановки здесь
+    обязаны совпадать с полями конфигурации, иначе одна и та же команда
+    из CLI и из GUI даст разный результат.
 
     Args:
-        args: результат `build_parser().parse_args()`.
+        args: пространство имён из `build_parser().parse_args()`.
 
     Returns:
-        Готовую конфигурацию без вызова `validate()` — проверка остаётся
-        за `render()` (FR-40).
+        Готовую конфигурацию; она ещё не проверена — проверку делает `render()`.
 
     Raises:
-        VideoTimerError: не бросает; неверные типы отсеивает argparse,
-            семантику — `TimerConfig.validate()`.
+        Не бросает исключений: неверные значения сообщает
+        `TimerConfig.validate()` в формате «поле: что не так» (FR-41).
     """
-    raise NotImplementedError
+    background: Path | None = None
+    if getattr(args, "background", None):
+        background = Path(args.background)
+
+    return TimerConfig(
+        output=Path(args.output),
+        mode=args.mode,
+        background=background,
+        bg_color=args.bg_color,
+        duration=getattr(args, "duration", None),
+        position=args.position,
+        font_size=args.font_size,
+        color=args.color,
+        countdown_seconds=getattr(args, "countdown_seconds", 60.0),
+        hold_seconds=getattr(args, "hold_seconds", 5.0),
+        hold_color=args.hold_color,
+        fps=args.fps,
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Точка входа CLI: разобрать аргументы, отрендерить, вернуть код."""
+    parser = build_parser()
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as exit_error:
+        if exit_error.code not in (0, 1, 2):
+            return 2
+        return exit_error.code
+    except Exception:
+        return 2
+
+    try:
+        cfg = _config_from_args(args)
+        result = render(cfg)
+    except VideoTimerError as error:
+        print(str(error), file=sys.stderr)
+        return 1
+    except Exception as error:
+        print(str(error), file=sys.stderr)
+        return 1
+
+    print(str(result.output))
+    return 0
 
 
 if __name__ == "__main__":  # pragma: no cover - точка входа CLI (FR-50)
