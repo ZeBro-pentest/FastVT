@@ -15,7 +15,8 @@ import threading
 from dataclasses import dataclass
 from typing import Literal
 
-from video_timer.config import TimerConfig
+from video_timer import renderer
+from video_timer.config import TimerConfig, VideoTimerError
 
 
 @dataclass
@@ -65,7 +66,10 @@ class RenderWorker:
         Raises:
             Не бросает исключений.
         """
-        raise NotImplementedError
+        self._events: queue.Queue[WorkerEvent] = _make_queue()
+        self._cancel_flag = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._running = False
 
     # since: v0.1 (FR-51)
     def start(self, cfg: TimerConfig) -> None:
@@ -88,7 +92,17 @@ class RenderWorker:
             VideoTimerError: если рендер уже идёт — второй вызов игнорируется,
             чтобы не завести два процесса ffmpeg на один выходной файл.
         """
-        raise NotImplementedError
+        if self._running:
+            raise VideoTimerError("render: рендер уже идёт")
+        self._running = True
+        self._cancel_flag.clear()
+        self._thread = threading.Thread(
+            target=self._run_and_finish,
+            args=(cfg,),
+            name="VideoTimer-render",
+            daemon=True,
+        )
+        self._thread.start()
 
     # since: v0.2 (FR-51)
     def cancel(self) -> None:
@@ -108,6 +122,26 @@ class RenderWorker:
         """
         raise NotImplementedError
 
+    # since: v0.1 (FR-51)
+    def _run_and_finish(self, cfg: TimerConfig) -> None:
+        """Выполнить `_thread_target` и снять флаг занятости.
+
+        Спека: FR-51, NFR-05. Версия: v0.1.
+
+        Флаг снимается в потоке, чтобы главный поток после события `done`
+        или `error` видел `_running == False` и останавливал опрос.
+
+        Args:
+            cfg: конфигурация рендера.
+
+        Returns:
+            Ничего.
+        """
+        try:
+            _thread_target(cfg, self._events, self._cancel_flag)
+        finally:
+            self._running = False
+
     # since: v0.1 (FR-51, NFR-05)
     def poll(self) -> list[WorkerEvent]:
         """Забрать из очереди все накопленные события.
@@ -126,7 +160,13 @@ class RenderWorker:
                 if event.kind == "progress":
                     progress_bar["value"] = event.payload[0] * 100
         """
-        raise NotImplementedError
+        events: list[WorkerEvent] = []
+        while True:
+            try:
+                events.append(self._events.get_nowait())
+            except queue.Empty:
+                break
+        return events
 
 
 # since: v0.1 (NFR-05)
@@ -141,7 +181,7 @@ def _make_queue() -> queue.Queue[WorkerEvent]:
     Returns:
         Пустую очередь для `WorkerEvent`.
     """
-    raise NotImplementedError
+    return queue.Queue(maxsize=64)
 
 
 # since: v0.1 (NFR-05)
@@ -164,4 +204,39 @@ def _thread_target(
         Исключения не выпускаются наружу: `VideoTimerError` кладётся в
         очередь как событие `error`, чтобы главный поток не падал (FR-42).
     """
-    raise NotImplementedError
+
+    def publish(fraction: float, total: float | None) -> None:
+        """Опубликовать прогресс, не блокируясь на полной очереди.
+
+        Args:
+            fraction: доля выполнения 0..1.
+            total: общая длительность в секундах.
+
+        Returns:
+            Ничего.
+        """
+        try:
+            events.put_nowait(WorkerEvent("progress", (fraction, total)))
+        except queue.Full:
+            pass
+
+    if cancel_flag.is_set():
+        events.put_nowait(
+            WorkerEvent(
+                "error", VideoTimerError("render: рендер отменён до запуска")
+            )
+        )
+        return
+    try:
+        result = renderer.render(cfg, on_progress=publish)
+    except VideoTimerError as error:
+        events.put_nowait(WorkerEvent("error", error))
+    except BaseException as error:  # noqa: BLE001 — в очередь, не в трейсбек
+        events.put_nowait(
+            WorkerEvent(
+                "error",
+                VideoTimerError(f"render: неожиданная ошибка: {error}"),
+            )
+        )
+    else:
+        events.put_nowait(WorkerEvent("done", result))

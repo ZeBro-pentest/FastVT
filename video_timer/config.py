@@ -191,6 +191,9 @@ class TimerConfig:
             - `hold_seconds`: >= 0 (FR-03)
             - `hold_color`: как `bg_color` (FR-03)
             - `fps`: 1…120 (FR-13)
+            Любое числовое поле с нечисловым значением отвечает
+            «поле: должно быть числом» — GUI передаёт строки из полей окна
+            (FR-41), в отличие от CLI, где числа собирает argparse.
 
         Проверки v0.2 (объявлены, выполняются позже):
             - `fmt`: одно из `mmss`, `hhmmss`, `mmssms` (FR-04)
@@ -233,6 +236,26 @@ class TimerConfig:
             """
             raise VideoTimerError(f"{_field_name_python_to_cli(field)}: {problem}")
 
+        def number(field: str, value: object) -> float:
+            """Превратить значение в число либо ответить понятной ошибкой.
+
+            Args:
+                field: имя поля датакласса (для `fail`).
+                value: значение из датакласса; GUI может передать строку,
+                    которую не удалось разобрать (FR-41).
+
+            Returns:
+                Число, готовое к сравнению.
+
+            Raises:
+                VideoTimerError: если значение не число — «поле: должно быть
+                    числом», чтобы GUI подсветил поле (FR-41).
+            """
+            try:
+                return float(value)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                fail(field, "должно быть числом")
+
         color_problem = (
             "ожидается #rgb, #rrggbb или имя цвета из списка: "
             + ", ".join(COLOR_NAMES)
@@ -256,10 +279,13 @@ class TimerConfig:
         if self.mode not in ("stopwatch", "countdown"):
             fail("mode", "ожидается stopwatch или countdown")
 
-        if self.mode == "countdown" and self.countdown_seconds <= 0:
+        if (
+            self.mode == "countdown"
+            and number("countdown_seconds", self.countdown_seconds) <= 0
+        ):
             fail("countdown_seconds", "должно быть больше 0")
 
-        if self.duration is not None and self.duration <= 0:
+        if self.duration is not None and number("duration", self.duration) <= 0:
             fail("duration", "должно быть больше 0")
 
         if self.duration is None and self.background is None:
@@ -269,19 +295,19 @@ class TimerConfig:
         if self.position not in POSITIONS:
             fail("position", "ожидается одно из: " + ", ".join(POSITIONS))
 
-        if not 8 <= self.font_size <= 500:
+        if not 8 <= number("font_size", self.font_size) <= 500:
             fail("font_size", "должен быть от 8 до 500")
 
         if not _is_valid_color(self.color):
             fail("color", color_problem)
 
-        if self.hold_seconds < 0:
+        if number("hold_seconds", self.hold_seconds) < 0:
             fail("hold_seconds", "не может быть меньше 0")
 
         if not _is_valid_color(self.hold_color):
             fail("hold_color", color_problem)
 
-        if not 1 <= self.fps <= 120:
+        if not 1 <= number("fps", self.fps) <= 120:
             fail("fps", "должен быть от 1 до 120")
 
     # since: v0.1 (FR-20), выбор по контейнеру — v0.2 (FR-21)

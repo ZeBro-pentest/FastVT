@@ -28,6 +28,29 @@ RAW_PLANE = FRAME_WIDTH * FRAME_HEIGHT
 
 
 @pytest.fixture
+def tk_root():
+    """Создать корневое окно Tkinter либо пропустить тест без дисплея.
+
+    Спека: FR-51. Версия: v0.1.
+
+    Тесты GUI создают настоящее окно, поэтому на машинах без доступа
+    к дисплею (нет `$DISPLAY`, WSLg выключен) они пропускаются, а не падают.
+    Окно создаётся и уничтожается на каждый тест, чтобы тесты не влияли
+    друг на друга.
+    """
+    import tkinter as tk
+
+    try:
+        root = tk.Tk()
+    except tk.TclError as error:
+        pytest.skip(f"нет доступа к дисплею Tkinter: {error}")
+    try:
+        yield root
+    finally:
+        root.destroy()
+
+
+@pytest.fixture
 def tmp_output(tmp_path: Path) -> Path:
     """Вернуть путь для выходного файла во временной папке.
 

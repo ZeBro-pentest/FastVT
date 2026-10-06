@@ -17,17 +17,67 @@ from tkinter import ttk
 
 # since: v0.1 (FR-41)
 FIELD_TO_WIDGET: dict[str, str] = {
-    # Заполняется по одной строке на каждое проверяемое поле TimerConfig:
+    # По одной строке на каждое проверяемое поле TimerConfig версии v0.1:
     # ключ — имя параметра в формате CLI (совпадает с префиксом сообщения
     # VideoTimerError), значение — имя атрибута виджета в ParamsPanel.
-    # Пример: "font-size": "_font_size_var",
-    #         "duration": "_duration_var",
+    "output": "_output_entry",
+    "background": "_background_entry",
+    "bg_color": "_bg_color_entry",
+    "mode": "_mode_combo",
+    "countdown-seconds": "_countdown_seconds_entry",
+    "duration": "_duration_entry",
+    "position": "_position_combo",
+    "font-size": "_font_size_entry",
+    "color": "_color_entry",
+    "hold-seconds": "_hold_seconds_entry",
+    "hold-color": "_hold_color_entry",
+    "fps": "_fps_entry",
 }
 """Соответствие «имя параметра → виджет» для подсветки ошибочного поля (FR-41).
 
-Таблица пуста на этапе каркаса: заполняется вместе с `ParamsPanel` в v0.1
-и должна расти одной строкой на каждую новую проверку `validate()`.
+Порядок строк не важен, важна полнота: на каждую проверку `validate()`
+нужна одна строка, чтобы первая ошибка подсветила своё поле (FR-41).
 """
+
+
+# since: v0.1 (FR-41)
+FIELD_ERROR_BG = "#f8d7da"
+"""Цвет фона ошибочного поля при подсветке (FR-41)."""
+
+
+_FIELDS_V01: tuple[tuple[str, str, str, str, str, ...], ...] = (
+    # (имя в CLI, основа атрибута, подпись, вид, значение, значения комбобокса…)
+    ("output", "output", "Выходной файл", "entry", ""),
+    ("background", "background", "Фон (видео/картинка)", "entry", ""),
+    ("bg_color", "bg_color", "Цвет фона", "entry", "black"),
+    ("mode", "mode", "Режим", "combo", "stopwatch", "stopwatch", "countdown"),
+    (
+        "countdown-seconds",
+        "countdown_seconds",
+        "Старт отсчёта, сек",
+        "entry",
+        "60",
+    ),
+    ("duration", "duration", "Длительность, сек", "entry", ""),
+    (
+        "position",
+        "position",
+        "Положение",
+        "combo",
+        "br",
+        "tl",
+        "tr",
+        "bl",
+        "br",
+        "center",
+    ),
+    ("font-size", "font_size", "Размер шрифта", "entry", "64"),
+    ("color", "color", "Цвет текста", "entry", "white"),
+    ("hold-seconds", "hold_seconds", "Пауза на 00:00, сек", "entry", "5"),
+    ("hold-color", "hold_color", "Цвет 00:00", "entry", "#e6362c"),
+    ("fps", "fps", "Кадров/сек", "entry", "30"),
+)
+"""Поля версии v0.1: имя CLI, основа атрибута, подпись, вид и значения по умолчанию."""
 
 
 # since: v0.1 (FR-51)
@@ -141,6 +191,10 @@ class ParamsPanel(ttk.Frame):
         `hold-seconds`, `hold-color`, `fps`. Формат часов зафиксирован на
         `мм:сс` и показывается подписью, полем не управляется (FR-04).
 
+        Каждому полю соответствует `StringVar` в `self._vars` (по имени в
+        формате CLI) и виджет-атрибут по имени из `FIELD_TO_WIDGET`.
+        «Ошибка → подсветка» находит виджет по таблице (FR-41).
+
         Args:
             parent: родительский виджет.
 
@@ -150,7 +204,32 @@ class ParamsPanel(ttk.Frame):
         Raises:
             tk.TclError: если родитель уже уничтожен.
         """
-        raise NotImplementedError
+        super().__init__(parent, padding=8)
+        self._vars: dict[str, tk.StringVar] = {}
+        self._widgets: dict[str, tk.Widget] = {}
+        for row, field in enumerate(_FIELDS_V01):
+            name, base, label, kind, default, *values = field
+            var = tk.StringVar(self, value=default)
+            self._vars[name] = var
+            setattr(self, f"_{base}_var", var)
+            ttk.Label(self, text=label).grid(row=row, column=0, sticky="w", pady=2)
+            if kind == "combo":
+                widget = ttk.Combobox(
+                    self, textvariable=var, values=values, state="readonly", width=28
+                )
+                suffix = "combo"
+            else:
+                widget = tk.Entry(
+                    self, textvariable=var, width=30, background="white"
+                )
+                suffix = "entry"
+            widget.grid(row=row, column=1, sticky="ew", pady=2, padx=(8, 0))
+            self._widgets[name] = widget
+            setattr(self, f"_{base}_{suffix}", widget)
+        ttk.Label(self, text="Формат часов: мм:сс (фиксирован, FR-04)").grid(
+            row=len(_FIELDS_V01), column=0, columnspan=2, sticky="w", pady=(8, 0)
+        )
+        self.columnconfigure(1, weight=1)
 
 
 # since: v0.1 (FR-51)
@@ -181,4 +260,12 @@ class RenderPanel(ttk.Frame):
         Raises:
             tk.TclError: если родитель уже уничтожен.
         """
-        raise NotImplementedError
+        super().__init__(parent, padding=8)
+        self.status_label = ttk.Label(self, text="", anchor="w", wraplength=460)
+        self.status_label.pack(fill="x")
+        self.progress_bar = ttk.Progressbar(
+            self, orient="horizontal", mode="determinate", maximum=100
+        )
+        self.progress_bar.pack(fill="x", pady=(6, 0))
+        self.render_button = ttk.Button(self, text="Рендерить")
+        self.render_button.pack(side="right", pady=(6, 0))

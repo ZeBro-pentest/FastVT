@@ -4,8 +4,8 @@
 до запуска ffmpeg. Остальные проверки берутся из таблицы правил
 `TimerConfig.validate()` (`SPEC.md` 7.1, `specs/v0.1.md`).
 
-Часть критерия A7 про код возврата CLI (день 03.10) и подсветку поля в GUI
-(день 05.10) оставлена красной намеренно, с указанием дня в docstring.
+Часть критерия A7 про код возврата CLI (день 03.10) закрыта тестами CLI,
+подсветка поля в GUI (день 06.10) — тестом `test_a7_gui_highlights_font_size_field`.
 """
 
 from __future__ import annotations
@@ -28,13 +28,45 @@ def test_a7_font_size_zero_rejected(base_cfg: TimerConfig) -> None:
     assert str(excinfo.value).startswith("font-size: ")
 
 
-def test_a7_gui_highlights_font_size_field(base_cfg: TimerConfig) -> None:
+def test_a7_gui_highlights_font_size_field(
+    tk_root: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A7: сообщение GUI подсвечивает поле размера шрифта.
 
-    Часть критерия A7 на день 05.10: нужны `FIELD_TO_WIDGET`, `ParamsPanel`
-    и `_highlight_field`. Сегодня закрывается только сообщение `validate()`.
+    Часть критерия A7 на день 06.10: ошибка «font-size: …» из `validate()`
+    подсвечивает виджет поля через `FIELD_TO_WIDGET`, а рендер не стартует.
     """
-    pytest.fail("не реализовано: A7 — подсветка поля font-size в GUI (день 05.10)")
+    import time
+
+    import video_timer.gui.app as app_module
+    from video_timer import osutil as osutil_module
+    from video_timer.gui.panels import FIELD_ERROR_BG
+
+    monkeypatch.setattr(osutil_module, "find_ffmpeg", lambda: Path("/usr/bin/ffmpeg"))
+
+    def _no_ffmpeg(cfg: TimerConfig, on_progress=None) -> None:
+        cfg.validate()
+        pytest.fail("ffmpeg не должен запускаться при ошибке валидации")
+
+    monkeypatch.setattr("video_timer.gui.worker.renderer.render", _no_ffmpeg)
+    app = app_module.VideoTimerApp(tk_root)  # type: ignore[arg-type]
+    app.params._output_var.set("out.mp4")
+    app.params._duration_var.set("8")
+    app.params._font_size_var.set("0")
+    error_widget = getattr(app.params, app_module.FIELD_TO_WIDGET["font-size"])
+
+    assert error_widget.cget("background") != FIELD_ERROR_BG
+    app.on_render()
+
+    deadline = time.monotonic() + 3.0
+    while error_widget.cget("background") != FIELD_ERROR_BG:
+        assert time.monotonic() < deadline, "событие error не пришло вовремя"
+        tk_root.update()  # type: ignore[attr-defined]
+        app._poll_events()
+        time.sleep(0.02)
+
+    assert app.render_panel.status_label.cget("text") != ""
+    assert not app.worker._running
 
 
 def test_valid_config_passes(base_cfg: TimerConfig) -> None:
@@ -55,6 +87,18 @@ def test_countdown_seconds_must_be_positive(base_cfg: TimerConfig) -> None:
     cfg = replace(base_cfg, mode="countdown", countdown_seconds=0.0, duration=None)
 
     with pytest.raises(VideoTimerError, match=r"^countdown-seconds: "):
+        cfg.validate()
+
+
+def test_non_numeric_duration_is_rejected(base_cfg: TimerConfig) -> None:
+    """Нечисловое число отвечает «поле: должно быть числом» (FR-41).
+
+    GUI передаёт в `TimerConfig` строки из полей окна, поэтому `validate()`
+    должна превратить `"abc"` в понятную ошибку, а не в `TypeError`.
+    """
+    cfg = replace(base_cfg, duration="abc")
+
+    with pytest.raises(VideoTimerError, match=r"^duration: должно быть числом$"):
         cfg.validate()
 
 
