@@ -45,6 +45,13 @@ def build_parser() -> argparse.ArgumentParser:
         prog="video_timer.cli",
         description="Генератор видео-таймера для наложения секундомера или обратного отсчёта",
         formatter_class=argparse.RawTextHelpFormatter,
+        add_help=False,
+    )
+    parser.add_argument(
+        "-h",
+        "--help",
+        action="help",
+        help="Показать эту справку и завершить работу",
     )
     parser.add_argument(
         "-o",
@@ -126,7 +133,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=30,
         help="Частота кадров",
     )
-    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+        help="Показать номер версии и завершить работу",
+    )
+    # Заголовок группы опций argparse по умолчанию английский; менять его
+    # можно только через приватный атрибут группы. Текст справки должен быть
+    # целиком на русском, как и остальные тексты интерфейса (NFR-08).
+    parser._optionals.title = "параметры"
     return parser
 
 
@@ -171,7 +187,35 @@ def _config_from_args(args: argparse.Namespace) -> TimerConfig:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Точка входа CLI: разобрать аргументы, отрендерить, вернуть код."""
+    """Точка входа CLI: разобрать аргументы, отрендерить, вернуть код.
+
+    Спека: FR-40, FR-41, FR-42, FR-50. Версия: v0.1. Коды возврата —
+    SPEC 7.8.
+
+    Порядок работы: сначала argparse, потом `TimerConfig.validate()` внутри
+    `render()`, потом запуск ffmpeg. Поэтому ошибка в поле даёт код 1 с
+    сообщением `«поле: что не так»`, а не запуск фильтров (критерий A7).
+    Трейсбек и сырой лог ffmpeg наружу не идут (FR-42): пользователь видит
+    только текст `VideoTimerError`.
+
+    Args:
+        argv: список аргументов без имени программы, например
+            ``["-o", "out.mp4", "--duration", "8"]``; ``None`` — взять
+            `sys.argv[1:]`. Список удобен тестам: они не трогают глобальное
+            состояние интерпретатора.
+
+    Returns:
+        0 — ролик записан; 1 — ошибка валидации или рендера; 2 — неверные
+        аргументы командной строки.
+
+    Raises:
+        Не бросает исключений: любая ошибка переводится в код возврата и
+        короткое сообщение в `stderr`, `KeyboardInterrupt` не перехватывается.
+
+    Пример:
+        main(["-o", "out.mp4", "--mode", "countdown", "--countdown-seconds", "10"])
+        # 0
+    """
     parser = build_parser()
     try:
         args = parser.parse_args(argv)
