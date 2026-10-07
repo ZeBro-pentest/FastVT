@@ -93,26 +93,27 @@
 ## 🚀 Установка
 
 <details open>
-<summary><b>🪟 [**Windows**](https://github.com/ZeBro-pentest/FastVT)</b></summary>
+<summary><b>🪟 Windows</b></summary>
 
 1. Скачайте архив последнего релиза: [**Releases**](https://github.com/ZeBro-pentest/FastVT/releases/latest)
 2. Распакуйте его в любую папку
 3. Запустите `FastVT.exe`
 
-Антивирус может ругаться на неподписанную сборку — это нормально для новых сборок
-без сертификата. При необходимости добавьте файл в исключения.
+> Антивирус может ругаться на неподписанную сборку — это нормально для новых сборок без сертификата. При необходимости добавьте файл в исключения.
+
 </details>
 
 <details>
-<summary><b>🍎 [**MacOS**](https://github.com/ZeBro-pentest/FastVT)</b></summary>
+<summary><b>🍎 macOS</b></summary>
 
 1. Скачайте архив: [**Releases**](https://github.com/ZeBro-pentest/FastVT/releases/latest)
 2. Распакуйте и переместите `FastVT.app` в «Программы»
 3. При первом запуске: **правый клик → Открыть** (обход проверки Gatekeeper)
+
 </details>
 
 <details>
-<summary><b>🐧 [**Linux**](https://github.com/ZeBro-pentest/FastVT)</b></summary>
+<summary><b>🐧 Linux</b></summary>
 
 1. Скачайте архив: [**Releases**](https://github.com/ZeBro-pentest/FastVT/releases/latest)
 2. Распакуйте и запустите:
