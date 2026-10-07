@@ -4,4 +4,4 @@
 (`video_timer.cli`, `video_timer.gui.app`) — здесь они не нужны.
 """
 
-__version__ = "0.0.0"
+__version__ = "0.1.0"

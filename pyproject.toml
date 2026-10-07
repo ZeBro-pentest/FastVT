@@ -1,6 +1,6 @@
 [project]
 name = "fastvt"
-version = "0.0.0"
+version = "0.1.0"
 description = "Генератор видео-таймера: наложение секундомера и обратного отсчёта через ffmpeg"
 requires-python = ">=3.10"
 dependencies = []
