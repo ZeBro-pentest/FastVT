@@ -205,6 +205,45 @@ def test_background_extension_must_be_video(
         cfg.validate()
 
 
+def test_image_background_accepted(base_cfg: TimerConfig, tmp_path: Path) -> None:
+    """Картинка принимается как фон наравне с видео (FR-10)."""
+    image = tmp_path / "bg.png"
+    image.write_bytes(b"\x89PNG\r\n\x1a\n")
+    cfg = replace(base_cfg, background=image)
+
+    cfg.validate()
+
+
+def test_duration_required_for_stopwatch_on_image(
+    base_cfg: TimerConfig, tmp_path: Path
+) -> None:
+    """Секундомер на картинке требует `duration`: свою длину картинка не имеет (FR-12)."""
+    image = tmp_path / "bg.png"
+    image.write_bytes(b"\x89PNG\r\n\x1a\n")
+    cfg = replace(base_cfg, background=image, duration=None)
+
+    with pytest.raises(VideoTimerError, match=r"^duration: "):
+        cfg.validate()
+
+
+def test_duration_not_required_for_countdown_on_image(
+    base_cfg: TimerConfig, tmp_path: Path
+) -> None:
+    """Для отсчёта длительность картинки = N + hold, `duration` не нужен (FR-12)."""
+    image = tmp_path / "bg.png"
+    image.write_bytes(b"\x89PNG\r\n\x1a\n")
+    cfg = replace(
+        base_cfg,
+        background=image,
+        mode="countdown",
+        countdown_seconds=10.0,
+        hold_seconds=5.0,
+        duration=None,
+    )
+
+    cfg.validate()
+
+
 @pytest.mark.parametrize("color", ["black", "white", "#fff", "#ff8800"])
 def test_colors_accept_hex_and_whitelist(base_cfg: TimerConfig, color: str) -> None:
     """Цвета принимаются как `#rgb`, `#rrggbb` или имя из списка (FR-06)."""
@@ -260,6 +299,24 @@ def test_known_total_duration_video_is_none(
     cfg = replace(base_cfg, background=video, duration=None)
 
     assert cfg.known_total_duration() is None
+
+
+def test_known_total_duration_countdown_on_image(
+    base_cfg: TimerConfig, tmp_path: Path
+) -> None:
+    """Для отсчёта на картинке длительность = N + hold, как у цвета (FR-12)."""
+    image = tmp_path / "bg.png"
+    image.write_bytes(b"\x89PNG\r\n\x1a\n")
+    cfg = replace(
+        base_cfg,
+        background=image,
+        mode="countdown",
+        countdown_seconds=10.0,
+        hold_seconds=5.0,
+        duration=None,
+    )
+
+    assert cfg.known_total_duration() == 15.0
 
 
 def test_resolved_encoder_is_libx264(base_cfg: TimerConfig) -> None:

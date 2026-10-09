@@ -1,8 +1,8 @@
-"""Тесты фона: видеофайл и сплошной цвет.
+"""Тесты фона: видеофайл, картинка и сплошной цвет.
 
-Фон — то, что подаётся на вход ffmpeg. Сегодня закрываются FR-10 (тип
-фона), FR-11 (длительность из ffprobe) и FR-12 (сплошной цвет даёт конечную
-длительность без файла). Картинка остаётся на v0.2.
+Фон — то, что подаётся на вход ffmpeg. Закрываются FR-10 (тип фона),
+FR-11 (длительность видео из ffprobe), FR-12 (картинка и цвет дают конечную
+длительность без файла) и FR-15 (звук видео-фона).
 """
 
 from __future__ import annotations
@@ -29,6 +29,55 @@ def make_video(path: Path, seconds: float = 5.0) -> Path:
             f"color=c=blue:s=320x240:r=10:d={seconds}",
             "-pix_fmt",
             "yuv420p",
+            str(path),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    return path
+
+
+def make_video_with_audio(path: Path, seconds: float = 3.0) -> Path:
+    """Создать видеофайл со звуковой дорожкой для FR-15."""
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            f"color=c=blue:s=320x240:r=10:d={seconds}",
+            "-f",
+            "lavfi",
+            "-i",
+            f"sine=frequency=440:duration={seconds}",
+            "-shortest",
+            "-pix_fmt",
+            "yuv420p",
+            str(path),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    return path
+
+
+def make_image(path: Path) -> Path:
+    """Создать настоящую картинку `.png` через ffmpeg."""
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=red:s=320x240",
+            "-frames:v",
+            "1",
             str(path),
         ],
         check=True,
@@ -169,3 +218,101 @@ def test_input_args_without_duration_have_no_limit(
     args = Background(cfg).input_args()
 
     assert "-t" not in args
+
+
+def test_image_kind_is_image(tmp_output: Path, tmp_path: Path) -> None:
+    """Файл с расширением картинки даёт `kind == "image"` (FR-10)."""
+    source = make_image(tmp_path / "bg.png")
+    cfg = TimerConfig(output=tmp_output, background=source, duration=4.0)
+
+    assert Background(cfg).kind == "image"
+
+
+def test_image_input_args_use_loop(tmp_output: Path, tmp_path: Path) -> None:
+    """Картинка зацикливается флагом `-loop 1` и ограничивается `-t` (FR-10, FR-12)."""
+    source = make_image(tmp_path / "bg.png")
+    cfg = TimerConfig(output=tmp_output, background=source, duration=4.0)
+
+    args = Background(cfg).input_args()
+
+    assert args[:4] == ["-loop", "1", "-i", str(source)]
+    assert args[args.index("-t") + 1] in {"4", "4.0"}
+
+
+def test_image_duration_from_config(
+    tmp_output: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Для картинки длительность берётся из `cfg.duration`, без ffprobe (FR-12)."""
+    source = make_image(tmp_path / "bg.png")
+
+    def forbidden(*_args: object) -> float:
+        raise AssertionError("ffprobe не должен вызываться для картинки")
+
+    monkeypatch.setattr(background_module, "_run_ffprobe", forbidden)
+    cfg = TimerConfig(output=tmp_output, background=source, duration=6.5)
+
+    assert Background(cfg).probe_duration() == pytest.approx(6.5)
+
+
+def test_image_duration_is_countdown_plus_hold(
+    tmp_output: Path, tmp_path: Path
+) -> None:
+    """Для отсчёта картинка живёт `countdown + hold`, `duration` не нужен (FR-12)."""
+    source = make_image(tmp_path / "bg.png")
+    cfg = TimerConfig(
+        output=tmp_output,
+        background=source,
+        mode="countdown",
+        countdown_seconds=10.0,
+        hold_seconds=5.0,
+    )
+
+    assert Background(cfg).probe_duration() == pytest.approx(15.0)
+
+
+def test_color_has_no_audio(base_cfg: TimerConfig) -> None:
+    """Сплошной цвет беззвучный: дорожка не создаётся (FR-15)."""
+    assert Background(base_cfg).has_audio() is False
+
+
+def test_image_has_no_audio(tmp_output: Path, tmp_path: Path) -> None:
+    """Картинка беззвучная: дорожка не создаётся (FR-15)."""
+    source = make_image(tmp_path / "bg.png")
+    cfg = TimerConfig(output=tmp_output, background=source, duration=4.0)
+
+    assert Background(cfg).has_audio() is False
+
+
+def test_video_with_audio_detected(tmp_output: Path, tmp_path: Path) -> None:
+    """Видео-фон со звуком распознаётся через ffprobe (FR-15)."""
+    source = make_video_with_audio(tmp_path / "av.mp4")
+    cfg = TimerConfig(output=tmp_output, background=source)
+
+    assert Background(cfg).has_audio() is True
+
+
+def test_video_without_audio_detected(tmp_output: Path, tmp_path: Path) -> None:
+    """Видео-фон без звука даёт `has_audio() is False` (FR-15)."""
+    source = make_video(tmp_path / "clip.mp4")
+    cfg = TimerConfig(output=tmp_output, background=source)
+
+    assert Background(cfg).has_audio() is False
+
+
+def test_video_audio_probed_only_once(
+    tmp_output: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Результат проверки звука запоминается: файл не зондируется повторно (FR-15)."""
+    calls: list[tuple[object, ...]] = []
+
+    def fake(*args: object) -> bool:
+        calls.append(args)
+        return True
+
+    source = make_video(tmp_path / "clip.mp4")
+    monkeypatch.setattr(background_module, "_run_ffprobe_audio", fake)
+    bg = Background(TimerConfig(output=tmp_output, background=source))
+
+    assert bg.has_audio() is True
+    assert bg.has_audio() is True
+    assert len(calls) == 1

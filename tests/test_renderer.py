@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from video_timer import osutil
+from video_timer.background import Background
 from video_timer.config import TimerConfig, VideoTimerError
 from video_timer.renderer import (
     LOG_TAIL_LINES,
@@ -264,6 +265,120 @@ def test_a2_shows_00_05_at_fifth_second(
     assert frames_match(actual, reference)
 
 
+def test_image_background_render_uses_its_duration(
+    tmp_output: Path, h264: str, tmp_path: Path
+) -> None:
+    """FR-10, FR-12: картинка-фон зацикливается и живёт ровно `duration`."""
+    ffmpeg, _font = ffmpeg_or_skip()
+    image = tmp_path / "bg.png"
+    subprocess.run(
+        [
+            ffmpeg, "-v", "error", "-y", "-f", "lavfi",
+            "-i", "color=c=blue:s=320x240:d=1", "-frames:v", "1", str(image),
+        ],
+        capture_output=True,
+        check=True,
+    )
+    cfg = TimerConfig(
+        output=tmp_output, background=image, duration=4.0,
+        resolution="320x240", font_size=48,
+    )
+    cfg.validate()
+    render(cfg)
+
+    length = probe_duration(cfg.output)
+    if length is None:
+        pytest.skip("ffprobe не найден")
+    assert length == pytest.approx(4.0, abs=0.3)
+
+
+def test_video_background_audio_is_preserved(
+    tmp_output: Path, h264: str, tmp_path: Path
+) -> None:
+    """FR-15: звук видео-фона попадает в результат."""
+    ffmpeg, _font = ffmpeg_or_skip()
+    source = tmp_path / "av.mp4"
+    subprocess.run(
+        [
+            ffmpeg, "-v", "error", "-y",
+            "-f", "lavfi", "-i", "color=c=blue:s=320x240:r=30:d=5",
+            "-f", "lavfi", "-i", "sine=frequency=440:duration=5",
+            "-c:v", h264, "-pix_fmt", "yuv420p", "-c:a", "aac",
+            "-shortest", str(source),
+        ],
+        capture_output=True,
+        check=True,
+    )
+    cfg = TimerConfig(
+        output=tmp_output, background=source, duration=5.0,
+        resolution="320x240", font_size=48,
+    )
+    cfg.validate()
+    render(cfg)
+
+    assert "a" in _stream_kinds(cfg.output), "звук фона потерян"
+
+
+def test_silent_video_background_renders_without_audio(
+    tmp_output: Path, h264: str, tmp_path: Path
+) -> None:
+    """FR-15: беззвучный видео-фон рендерится и не ломает команду `-map`."""
+    ffmpeg, _font = ffmpeg_or_skip()
+    source = tmp_path / "silent.mp4"
+    subprocess.run(
+        [
+            ffmpeg, "-v", "error", "-y", "-f", "lavfi",
+            "-i", "color=c=blue:s=320x240:r=30:d=5",
+            "-c:v", h264, "-pix_fmt", "yuv420p", str(source),
+        ],
+        capture_output=True,
+        check=True,
+    )
+    cfg = TimerConfig(
+        output=tmp_output, background=source, duration=5.0,
+        resolution="320x240", font_size=48,
+    )
+    cfg.validate()
+    render(cfg)
+
+    assert cfg.output.exists()
+    assert "a" not in _stream_kinds(cfg.output)
+
+
+def _stream_kinds(path: Path) -> set[str]:
+    """Вернуть набор типов потоков файла: `v` для видео, `a` для звука.
+
+    Спека: FR-15. Версия: v0.2.
+
+    Args:
+        path: путь к готовому или исходному файлу.
+
+    Returns:
+        Множество кодов типов (`v`, `a`) или пустое множество, если ffprobe
+        недоступен.
+
+    Raises:
+        Не бросает исключений.
+    """
+    probe = osutil.find_ffprobe()
+    if probe is None:
+        return set()
+    finished = subprocess.run(
+        [
+            str(probe), "-v", "error", "-show_entries",
+            "stream=codec_type", "-of", "csv=p=0", str(path),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    kinds: set[str] = set()
+    for line in finished.stdout.splitlines():
+        code = line.strip()[:1]
+        if code in {"v", "a"}:
+            kinds.add(code)
+    return kinds
+
+
 def test_command_is_list_of_arguments(base_cfg: TimerConfig) -> None:
     """Команда ffmpeg собирается списком, `shell=True` не используется."""
     ffmpeg_or_skip()
@@ -312,6 +427,35 @@ def test_command_omits_crf_for_other_encoder(
     assert command[command.index("-c:v") + 1] == "mpeg4"
     assert "-crf" not in command
     assert "-preset" not in command
+
+
+def test_command_keeps_audio_of_video_background(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FR-15: звуковой видео-фон даёт в команде аудиокодек и `-map` (v0.2)."""
+    ffmpeg_or_skip()
+    monkeypatch.setattr(Background, "has_audio", lambda self: True)
+    cfg = TimerConfig(output=tmp_path / "out.mp4", duration=3.0)
+
+    command = FFmpegRenderer(cfg).build_command()
+
+    assert "-c:a" in command
+    assert command[command.index("-c:a") + 1] == "aac"
+    assert "-map" in command
+    assert command[command.index("-map") + 1] == "0:a:0"
+
+
+def test_command_has_no_audio_for_silent_background(
+    base_cfg: TimerConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FR-15: у цвета звука нет, аудиокодек и `-map` в команду не попадают."""
+    ffmpeg_or_skip()
+    monkeypatch.setattr(Background, "has_audio", lambda self: False)
+
+    command = FFmpegRenderer(base_cfg).build_command()
+
+    assert "-c:a" not in command
+    assert "-map" not in command
 
 
 def test_render_validates_before_running(base_cfg: TimerConfig, h264: str) -> None:

@@ -68,6 +68,9 @@ _COLOR_HEX_RE = re.compile(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 _VIDEO_EXTS_SET = set(VIDEO_EXTS)
 """Множество расширений видео для быстрой проверки ``background`` (FR-10)."""
 
+_IMAGE_EXTS_SET = set(IMAGE_EXTS)
+"""Множество расширений картинок для быстрой проверки ``background`` (FR-10)."""
+
 
 def _field_name_python_to_cli(name: str) -> str:
     """Преобразовать имя поля `TimerConfig` в имя параметра CLI с дефисом.
@@ -267,10 +270,15 @@ class TimerConfig:
         if self.background is not None:
             if not self.background.exists():
                 fail("background", f"файл не найден: {self.background}")
-            if self.background.suffix.lower() not in _VIDEO_EXTS_SET:
+            suffix = self.background.suffix.lower()
+            if suffix not in _VIDEO_EXTS_SET and suffix not in _IMAGE_EXTS_SET:
                 fail(
                     "background",
-                    "ожидается видеофайл (" + ", ".join(VIDEO_EXTS) + ")",
+                    "ожидается видеофайл ("
+                    + ", ".join(VIDEO_EXTS)
+                    + ") или картинка ("
+                    + ", ".join(IMAGE_EXTS)
+                    + ")",
                 )
 
         if not _is_valid_color(self.bg_color):
@@ -288,8 +296,8 @@ class TimerConfig:
         if self.duration is not None and number("duration", self.duration) <= 0:
             fail("duration", "должно быть больше 0")
 
-        if self.duration is None and self.background is None:
-            if self.mode == "stopwatch":
+        if self.duration is None and self.mode == "stopwatch":
+            if self.background is None or self._is_image():
                 fail("duration", "обязателен для секундомера без видео-фона")
 
         if self.position not in POSITIONS:
@@ -340,7 +348,7 @@ class TimerConfig:
     def known_total_duration(self) -> float | None:
         """Вернуть длительность результата, если её можно узнать без ffprobe.
 
-        Спека: FR-11, FR-12. Версия: v0.1.
+        Спека: FR-11, FR-12. Версия: v0.1 (цвет и видео), v0.2 (картинка).
 
         Правила:
             - сплошной цвет или картинка, `mode == "countdown"`:
@@ -362,8 +370,23 @@ class TimerConfig:
             cfg.known_total_duration()
             # 15.0
         """
-        if self.background is not None:
+        if self.background is not None and not self._is_image():
             return self.duration
         if self.mode == "countdown":
             return self.countdown_seconds + self.hold_seconds
         return self.duration
+
+    # since: v0.2 (FR-10, FR-12)
+    def _is_image(self) -> bool:
+        """Проверить, что заданный фон — картинка, а не видео (FR-10).
+
+        Картинка ведёт себя как сплошной цвет: своей длительности у неё нет
+        (FR-12), звука тоже (FR-15). Видео определяется по расширению
+        :data:`IMAGE_EXTS`.
+
+        Returns:
+            ``True``, если `background` задан и его расширение — картинка.
+        """
+        if self.background is None:
+            return False
+        return self.background.suffix.lower() in _IMAGE_EXTS_SET

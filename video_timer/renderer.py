@@ -23,6 +23,7 @@ from typing import Callable
 from video_timer import osutil
 from video_timer.background import Background
 from video_timer.config import TimerConfig, VideoTimerError
+from video_timer.encoders import OUTPUT_CODECS
 from video_timer.filters import FilterBuilder
 
 # since: v0.1 (NFR-04)
@@ -136,7 +137,8 @@ class FFmpegRenderer:
     def build_command(self) -> list[str]:
         """Собрать полный список аргументов ffmpeg для этой конфигурации.
 
-        Спека: FR-11…FR-15, FR-20, FR-23. Версия: v0.1.
+        Спека: FR-11…FR-15, FR-20, FR-23. Версия: v0.1 (видео, цвет),
+        v0.2 (картинка, звук).
 
         Собирается список строк, `shell=True` не используется: пути с
         пробелами и кавычками остаются целыми аргументами. Структура:
@@ -145,10 +147,14 @@ class FFmpegRenderer:
             3. ``-filter_complex`` из `FilterBuilder.build()`
             4. кодек видео из `TimerConfig.resolved_encoder()`, CRF и preset
                для libx264 (FR-20, FR-23)
-            5. аудиокодек, только если фон звуковой (FR-15, v0.2)
+            5. аудиокодек и `-map 0:a:0`, только если фон звуковой (FR-15)
             6. ``-r`` с `cfg.fps`, путь выхода
 
-        В v0.1 аудиокодек не добавляется: звук в версию не входит.
+        Звук переносится из видео-фона как есть и перекодируется в кодек
+        контейнера по :data:`encoders.OUTPUT_CODECS` (FR-15). У цвета и
+        картинки, а также если ffprobe не нашёл аудио, `-map` не добавляется:
+        иначе ffmpeg падает на пустом потоке. Без `-map` звук молчаливого
+        фона просто не попадает в вывод.
 
         CRF и preset добавляются только для libx264: у других кодеков таких
         опций нет, и ffmpeg отверг бы команду целиком.
@@ -178,6 +184,12 @@ class FFmpegRenderer:
             command.extend(
                 ["-crf", str(self.cfg.crf), "-preset", self.cfg.preset]
             )
+        if self.background.has_audio():
+            audio_codec = OUTPUT_CODECS.get(
+                self.cfg.output.suffix.lower(), {}
+            ).get("audio")
+            if audio_codec is not None:
+                command.extend(["-map", "0:a:0", "-c:a", audio_codec])
         command.extend(["-r", str(self.cfg.fps), str(self.cfg.output)])
         return command
 
