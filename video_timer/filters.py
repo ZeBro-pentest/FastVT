@@ -215,17 +215,17 @@ class FilterBuilder:
     def build_scale_filter(self) -> str | None:
         """Собрать фильтр приведения фона к `resolution` и `fit`.
 
-        Спека: FR-13, FR-14. Версия: v0.2.
+        Спека: FR-13, FR-14. Версия: v0.2 (критерии A3, A4).
 
         Три режима:
-            - ``stretch``: ``scale=Ш:В:flags=bicubic``
-            - ``contain``: ``scale`` с сохранением пропорций плюс ``pad``
-              чёрными полями (критерий A3)
-            - ``cover``: ``scale`` с увеличением и ``crop`` по центру
-              (критерий A4)
+            - ``stretch``: ``scale=Ш:В:flags=bicubic`` — пропорции не берегутся
+            - ``contain``: ``scale`` с ``force_original_aspect_ratio=decrease``
+              плюс ``pad`` чёрными полями (критерий A3)
+            - ``cover``: ``scale`` с ``force_original_aspect_ratio=increase``
+              и ``crop`` по центру, без полей (критерий A4)
 
-        В v0.1 `resolution` всегда ``None``, поэтому метод возвращает
-        ``None`` и цепочка ограничивается таймером.
+        Если `cfg.resolution` не задан, приводить фон не к чему: возвращается
+        ``None``, и цепочка ограничивается таймером (FR-13).
 
         Returns:
             Строку фильтра или ``None``, если масштабировать нечего.
@@ -234,7 +234,26 @@ class FilterBuilder:
             build_scale_filter()  # resolution="1080x1080", fit="contain"
             # "scale=1080:1080:force_original_aspect_ratio=decrease,pad=1080:1080:(ow-iw)/2:(oh-ih)/2:black"
         """
-        return None
+        resolution = self.cfg.resolution
+        if resolution is None:
+            return None
+
+        width_text, height_text = resolution.split("x", 1)
+        width, height = int(width_text), int(height_text)
+
+        if self.cfg.fit == "stretch":
+            return f"scale={width}:{height}:flags=bicubic"
+
+        if self.cfg.fit == "cover":
+            return (
+                f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+                f"crop={width}:{height}"
+            )
+
+        return (
+            f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black"
+        )
 
     # since: v0.1 (FR-01…FR-07)
     def build_timer_filters(self) -> list[str]:

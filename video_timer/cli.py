@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 from video_timer import __version__
-from video_timer.config import TimerConfig, VideoTimerError
+from video_timer.config import FIT_MODES, TimerConfig, VideoTimerError
 from video_timer.renderer import render
 
 
@@ -26,7 +26,8 @@ def build_parser() -> argparse.ArgumentParser:
     """Собрать парсер аргументов командной строки.
 
     Спека: FR-50. Версия: v0.1 (параметры из `specs/v0.1.md`), v0.2
-    (`--estimate-only`, `--verbose`, `--encoder`, `--crf`, `--preset`).
+    (`--resolution`, `--fit`, `--estimate-only`, `--verbose`, `--encoder`,
+    `--crf`, `--preset`).
 
     Имена опций совпадают с именами полей `TimerConfig` через дефис,
     чтобы сообщение об ошибке и подсказка `--help` говорили одно и то же:
@@ -134,6 +135,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Частота кадров",
     )
     parser.add_argument(
+        "--resolution",
+        type=str,
+        default=None,
+        help="Разрешение вывода ШxВ, например 1920x1080 (опц.)",
+    )
+    parser.add_argument(
+        "--fit",
+        choices=list(FIT_MODES),
+        default="contain",
+        help="Как вписать фон в разрешение (по умолчанию contain)",
+    )
+    parser.add_argument(
         "--version",
         action="version",
         version=f"%(prog)s {__version__}",
@@ -183,6 +196,8 @@ def _config_from_args(args: argparse.Namespace) -> TimerConfig:
         hold_seconds=getattr(args, "hold_seconds", 5.0),
         hold_color=args.hold_color,
         fps=args.fps,
+        resolution=getattr(args, "resolution", None),
+        fit=getattr(args, "fit", "contain"),
     )
 
 

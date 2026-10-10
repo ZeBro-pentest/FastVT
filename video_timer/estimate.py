@@ -19,7 +19,7 @@ from video_timer.background import Background
 from video_timer.config import TimerConfig
 
 # since: v0.2 (FR-23)
-DEFAULT_RESOLUTION: str = "1280x720"
+DEFAULT_RESOLUTION: str = "1920x1080"
 """Разрешение по умолчанию, если в конфигурации своё не задано (FR-13)."""
 
 

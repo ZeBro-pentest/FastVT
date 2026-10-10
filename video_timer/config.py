@@ -65,6 +65,10 @@ COLOR_NAMES: tuple[str, ...] = (
 _COLOR_HEX_RE = re.compile(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 """Шаблон допустимых hex-форм цвета: ``#rgb`` или ``#rrggbb``."""
 
+# since: v0.2 (FR-13)
+_RESOLUTION_RE = re.compile(r"^(\d+)x(\d+)$")
+"""Шаблон разрешения ``ШxВ``: две группы цифр через строчную латинскую `x` (FR-13)."""
+
 _VIDEO_EXTS_SET = set(VIDEO_EXTS)
 """Множество расширений видео для быстрой проверки ``background`` (FR-10)."""
 
@@ -145,7 +149,7 @@ class TimerConfig:
         hold_color: цвет ``00:00`` в фазе hold (FR-03).
         bg_style: подложка под текстом из :data:`BG_STYLES` (FR-07).
         resolution: желаемое разрешение ``ШxВ``; ``None`` — как у источника
-            или ``1280x720`` для сплошного цвета (FR-13).
+            или ``1920x1080`` для сплошного цвета (FR-13).
         fit: способ вписать фон в `resolution` из :data:`FIT_MODES` (FR-14).
         fps: частота кадров результата, 1…120 (FR-13).
         encoder: явный кодек видео; ``None`` — подобрать по расширению (FR-21).
@@ -198,12 +202,14 @@ class TimerConfig:
             «поле: должно быть числом» — GUI передаёт строки из полей окна
             (FR-41), в отличие от CLI, где числа собирает argparse.
 
+        Проверки v0.2 (выполняются с 10.10):
+            - `resolution`: `^\\d+x\\d+$`, обе стороны > 0 (FR-13)
+            - `fit`: одно из `FIT_MODES` (FR-14)
+
         Проверки v0.2 (объявлены, выполняются позже):
             - `fmt`: одно из `mmss`, `hhmmss`, `mmssms` (FR-04)
             - `font`: файл существует, расширение `.ttf` / `.otf` / `.ttc` (FR-06)
             - `bg_style`: одно из `BG_STYLES` (FR-07)
-            - `resolution`: `^\\d+x\\d+$`, обе стороны > 0 (FR-13)
-            - `fit`: одно из `FIT_MODES` (FR-14)
             - `crf`: 0…51 при libx264 (FR-23)
             - `encoder`: совместим с контейнером (FR-21)
 
@@ -314,6 +320,17 @@ class TimerConfig:
 
         if not _is_valid_color(self.hold_color):
             fail("hold_color", color_problem)
+
+        if self.resolution is not None:
+            match = _RESOLUTION_RE.match(str(self.resolution))
+            if match is None or int(match.group(1)) <= 0 or int(match.group(2)) <= 0:
+                fail(
+                    "resolution",
+                    "ожидается ШИРИНАxВЫСОТА, например 1920x1080",
+                )
+
+        if self.fit not in FIT_MODES:
+            fail("fit", "ожидается одно из: " + ", ".join(FIT_MODES))
 
         if not 1 <= number("fps", self.fps) <= 120:
             fail("fps", "должен быть от 1 до 120")

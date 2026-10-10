@@ -155,6 +155,43 @@ def test_fps_bounds(base_cfg: TimerConfig, fps: int) -> None:
         cfg.validate()
 
 
+@pytest.mark.parametrize("resolution", ["1920x1080", "1080x1080", "640x480"])
+def test_resolution_accepts_width_height(base_cfg: TimerConfig, resolution: str) -> None:
+    """Разрешение вида `ШxВ` принимается (FR-13)."""
+    replace(base_cfg, resolution=resolution).validate()
+
+
+@pytest.mark.parametrize(
+    "resolution",
+    ["1080-1080", "1080x", "x1080", "abc", "1080*1080", "0x100", "100x0"],
+)
+def test_resolution_rejects_malformed(base_cfg: TimerConfig, resolution: str) -> None:
+    """Неверное `resolution` отклоняется с префиксом поля (FR-13, FR-41)."""
+    cfg = replace(base_cfg, resolution=resolution)
+
+    with pytest.raises(VideoTimerError, match=r"^resolution: "):
+        cfg.validate()
+
+
+def test_resolution_none_passes(base_cfg: TimerConfig) -> None:
+    """`resolution=None` — размер источника, проверка не мешает (FR-13)."""
+    replace(base_cfg, resolution=None).validate()
+
+
+@pytest.mark.parametrize("fit", ["stretch", "contain", "cover"])
+def test_fit_accepts_all_modes(base_cfg: TimerConfig, fit: str) -> None:
+    """Все режимы `fit` из списка допустимы (FR-14)."""
+    replace(base_cfg, fit=fit).validate()
+
+
+def test_fit_rejects_unknown_mode(base_cfg: TimerConfig) -> None:
+    """Режим `fit` вне списка отклоняется (FR-14)."""
+    cfg = replace(base_cfg, fit="fill")
+
+    with pytest.raises(VideoTimerError, match=r"^fit: "):
+        cfg.validate()
+
+
 @pytest.mark.parametrize("suffix", [".mov", ".webm", ".mkv"])
 def test_output_extension_must_be_mp4(base_cfg: TimerConfig, suffix: str) -> None:
     """В v0.1 вывод с другим расширением отклоняется (FR-20)."""

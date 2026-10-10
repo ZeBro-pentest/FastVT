@@ -217,6 +217,33 @@ def test_parser_accepts_video_background(tmp_path: Path) -> None:
     assert _config_from_args(args).background == video
 
 
+def test_parser_accepts_resolution_and_fit(tmp_path: Path) -> None:
+    """Опции `--resolution` и `--fit` доходят до конфигурации (FR-13, FR-14)."""
+    args = build_parser().parse_args(
+        ["-o", "out.mp4", "--resolution", "1080x1080", "--fit", "cover"]
+    )
+    cfg = _config_from_args(args)
+
+    assert cfg.resolution == "1080x1080"
+    assert cfg.fit == "cover"
+
+
+def test_parser_fit_defaults_to_contain() -> None:
+    """Без `--fit` используется `contain`, как в `TimerConfig` (FR-14)."""
+    cfg = _config_from_args(build_parser().parse_args(["-o", "out.mp4"]))
+
+    assert cfg.fit == "contain"
+    assert cfg.resolution is None
+
+
+def test_parser_rejects_bad_fit(capsys: pytest.CaptureFixture) -> None:
+    """Недопустимый `--fit` отклоняется argparse (FR-14)."""
+    with pytest.raises(SystemExit) as excinfo:
+        build_parser().parse_args(["-o", "out.mp4", "--fit", "fill"])
+
+    assert excinfo.value.code == 2
+
+
 def test_parser_rejects_bad_choice(capsys: pytest.CaptureFixture) -> None:
     """Недопустимый выбор для `--mode` отклоняется argparse (FR-01)."""
     with pytest.raises(SystemExit) as excinfo:

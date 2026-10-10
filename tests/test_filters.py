@@ -4,8 +4,9 @@
 экранирование текста, фаза hold и завершающий `format=yuv420p`. Критерии A1 и
 A2 относятся к результату рендера, здесь проверяется только то, как он собран.
 
-Масштабирование (`fit`, своё разрешение, критерии A3 и A4) и подложка
-(`bg_style`, FR-07) помечены в спеке как v0.2 и остаются заглушками.
+Масштабирование (`fit`, своё разрешение, критерии A3 и A4) проверяется здесь по
+собранной цепочке, а результат рендера — в `test_render_pipeline.py`. Подложка
+(`bg_style`, FR-07) помечена в спеке как v0.2 и пока остаётся заглушкой.
 """
 
 from __future__ import annotations
@@ -313,18 +314,57 @@ def test_parts_are_not_duplicated(base_cfg: TimerConfig) -> None:
 
 
 def test_scale_filter_contain_pads_black_bars(base_cfg: TimerConfig) -> None:
-    """`contain` добавляет `pad` чёрными полями (FR-14, критерий A3)."""
-    pytest.fail("не реализовано: A3 — fit=contain добавляет pad (v0.2)")
+    """`contain` сохраняет пропорции и добавляет `pad` чёрными полями (A3, FR-14)."""
+    base_cfg.resolution = "1080x1080"
+    base_cfg.fit = "contain"
+    scale = builder(base_cfg).build_scale_filter()
+
+    assert scale is not None
+    assert "scale=1080:1080" in scale
+    assert "force_original_aspect_ratio=decrease" in scale
+    assert "pad=1080:1080" in scale
 
 
 def test_scale_filter_cover_crops_edges(base_cfg: TimerConfig) -> None:
-    """`cover` добавляет `crop` без полей (FR-14, критерий A4)."""
-    pytest.fail("не реализовано: A4 — fit=cover добавляет crop (v0.2)")
+    """`cover` увеличивает фон и обрезает края, без полей (A4, FR-14)."""
+    base_cfg.resolution = "1080x1080"
+    base_cfg.fit = "cover"
+    scale = builder(base_cfg).build_scale_filter()
+
+    assert scale is not None
+    assert "scale=1080:1080" in scale
+    assert "force_original_aspect_ratio=increase" in scale
+    assert "crop=1080:1080" in scale
+    assert "pad=" not in scale
 
 
 def test_scale_filter_stretch_has_no_pad(base_cfg: TimerConfig) -> None:
     """`stretch` только масштабирует, без `pad` и `crop` (FR-14)."""
-    pytest.fail("не реализовано: FR-14 — fit=stretch без pad и crop (v0.2)")
+    base_cfg.resolution = "640x480"
+    base_cfg.fit = "stretch"
+    scale = builder(base_cfg).build_scale_filter()
+
+    assert scale is not None
+    assert scale.startswith("scale=640:480")
+    assert "pad=" not in scale
+    assert "crop=" not in scale
+
+
+def test_scale_filter_is_applied_before_timer(base_cfg: TimerConfig) -> None:
+    """Масштаб идёт первым, таймер рисуется уже поверх итогового размера (FR-13)."""
+    base_cfg.resolution = "640x480"
+    chain = builder(base_cfg).build()
+
+    assert chain[0].startswith("scale=640:480")
+    assert any(item.startswith("drawtext=") for item in chain)
+
+
+def test_scale_chain_is_parsed_by_real_ffmpeg(base_cfg: TimerConfig) -> None:
+    """Цепочка с масштабированием разбирается настоящим ffmpeg (FR-13, A3)."""
+    base_cfg.resolution = "320x240"
+    base_cfg.fit = "contain"
+
+    assert _ffmpeg_accepts(builder(base_cfg).build())
 
 
 def test_shadow_style_adds_box_filter(base_cfg: TimerConfig) -> None:

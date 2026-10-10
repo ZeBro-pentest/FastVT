@@ -132,6 +132,94 @@ def duration_of(ffmpeg: str, path: Path) -> float | None:
         return None
 
 
+def probe_size(ffmpeg: str, path: Path) -> tuple[int, int] | None:
+    """Узнать размер кадра готового файла через ffprobe.
+
+    Спека: критерии A3, A4, FR-13. Версия: v0.2.
+
+    Args:
+        ffmpeg: путь к ffmpeg; рядом ищем ffprobe тем же способом.
+        path: путь к готовому ролику.
+
+    Returns:
+        Пару ``(ширина, высота)`` или ``None``, если ffprobe недоступен.
+
+    Raises:
+        Не бросает исключений.
+    """
+    probe = osutil.find_ffprobe()
+    if probe is None:
+        return None
+    finished = subprocess.run(
+        [
+            str(probe),
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height",
+            "-of",
+            "csv=p=0:s=x",
+            str(path),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    try:
+        width, height = finished.stdout.strip().split("x")
+        return int(width), int(height)
+    except ValueError:
+        return None
+
+
+def pixel_gray(ffmpeg: str, path: Path, x: int, y: int) -> int | None:
+    """Прочитать яркость участка 8×8 готового ролика.
+
+    Спека: критерии A3, A4. Версия: v0.2.
+
+    Кадр `yuv420p` нельзя обрезать до одного пикселя: хрома-плоскости требуют
+    чётных размеров, и `crop=1:1` возвращает пустой поток. Берётся блок 8×8,
+    возвращается средняя яркость — для сплошного фона этого достаточно.
+
+    Args:
+        ffmpeg: путь к исполняемому файлу ffmpeg.
+        path: путь к готовому ролику.
+        x: координата левого верхнего угла блока.
+        y: координата левого верхнего угла блока.
+
+    Returns:
+        Среднюю яркость 0…255 или ``None``, если ffmpeg не отдал блок.
+
+    Raises:
+        Не бросает исключений.
+    """
+    finished = subprocess.run(
+        [
+            ffmpeg,
+            "-v",
+            "error",
+            "-ss",
+            "0.5",
+            "-i",
+            str(path),
+            "-vf",
+            f"crop=8:8:{x}:{y}",
+            "-frames:v",
+            "1",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "gray",
+            "-",
+        ],
+        capture_output=True,
+    )
+    if len(finished.stdout) < 64:
+        return None
+    return sum(finished.stdout[:64]) // 64
+
+
 @pytest.fixture
 def countdown_cfg(tmp_path: Path) -> TimerConfig:
     """Конфигурация критерия A1: отсчёт 10 с, hold 5 с, чёрный фон."""
@@ -333,3 +421,82 @@ def test_position_moves_timer(tmp_output: Path, tmp_path: Path) -> None:
 
     assert corner_frame is not None and center_frame is not None
     assert not frames_match(corner_frame, center_frame)
+
+
+@pytest.fixture
+def wide_video(tmp_path: Path) -> Path:
+    """Создать видео 16:9 для проверки полей и обрезки (A3, A4).
+
+    Спека: критерии A3, A4. Версия: v0.2.
+
+    Сплошной зелёный цвет удобно отличать от чёрных полей `pad`: яркость
+    зелёного в оттенках серого заметно выше нуля.
+    """
+    ffmpeg, _font = ffmpeg_or_skip()
+    source = tmp_path / "wide.mp4"
+    subprocess.run(
+        [
+            ffmpeg,
+            "-v",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=green:s=640x360:r=30:d=1",
+            "-pix_fmt",
+            "yuv420p",
+            str(source),
+        ],
+        capture_output=True,
+        check=True,
+    )
+    return source
+
+
+def test_a3_contain_gives_square_with_black_bars(
+    wide_video: Path, tmp_output: Path
+) -> None:
+    """A3: видео 16:9 с `--resolution 1080x1080 --fit contain` даёт 1080×1080 с полями."""
+    ffmpeg, _font = ffmpeg_or_skip()
+    cfg = TimerConfig(
+        output=tmp_output,
+        background=wide_video,
+        resolution="1080x1080",
+        fit="contain",
+        font_size=48,
+    )
+    cfg.validate()
+    assert render(cfg, ffmpeg)
+
+    assert probe_size(ffmpeg, cfg.output) == (1080, 1080)
+    top = pixel_gray(ffmpeg, cfg.output, 540, 2)
+    bottom = pixel_gray(ffmpeg, cfg.output, 540, 1070)
+    center = pixel_gray(ffmpeg, cfg.output, 540, 540)
+
+    assert top is not None and top < 50, "сверху должна быть чёрная полоса"
+    assert bottom is not None and bottom < 50, "снизу должна быть чёрная полоса"
+    assert center is not None and center > 60, "в центре должен быть кадр видео"
+
+
+def test_a4_cover_gives_square_without_bars(
+    wide_video: Path, tmp_output: Path
+) -> None:
+    """A4: то же с `--fit cover` даёт 1080×1080 без полей, края обрезаны."""
+    ffmpeg, _font = ffmpeg_or_skip()
+    cfg = TimerConfig(
+        output=tmp_output,
+        background=wide_video,
+        resolution="1080x1080",
+        fit="cover",
+        font_size=48,
+    )
+    cfg.validate()
+    assert render(cfg, ffmpeg)
+
+    assert probe_size(ffmpeg, cfg.output) == (1080, 1080)
+    top = pixel_gray(ffmpeg, cfg.output, 540, 2)
+    center = pixel_gray(ffmpeg, cfg.output, 540, 540)
+
+    assert top is not None and top > 50, "полей сверху быть не должно"
+    assert center is not None and center > 60

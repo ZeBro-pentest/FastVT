@@ -187,6 +187,21 @@ def test_color_input_args_have_resolution_and_rate(base_cfg: TimerConfig) -> Non
     assert "r=" in source
 
 
+def test_color_default_resolution_is_1920x1080(base_cfg: TimerConfig) -> None:
+    """Цвет без `resolution` рендерится в 1920x1080 (v0.2, SPEC 4.1)."""
+    source = Background(base_cfg).input_args()[-1]
+
+    assert "s=1920x1080" in source
+
+
+def test_resolution_overrides_color_default(base_cfg: TimerConfig) -> None:
+    """Заданный `resolution` перебивает размер цвета по умолчанию (FR-13)."""
+    base_cfg.resolution = "1080x1080"
+    source = Background(base_cfg).input_args()[-1]
+
+    assert "s=1080x1080" in source
+
+
 def test_video_input_args_are_input_then_path(tmp_output: Path, tmp_path: Path) -> None:
     """Видео-фон даёт `-i <путь>`, путь идёт строкой (FR-10)."""
     source = make_video(tmp_path / "clip.mp4")
