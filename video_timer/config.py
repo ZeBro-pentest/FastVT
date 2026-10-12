@@ -185,7 +185,7 @@ class TimerConfig:
         Спека: FR-40, FR-41, FR-42. Версия: v0.1 (поля v0.2+ пока не проверяются).
 
         Проверки v0.1 (в порядке объявления полей, первая ошибка — ответ):
-            - `output`: расширение `.mp4` (FR-20, полный список — v0.2)
+            - `output`: расширение из `FORMATS` (FR-20)
             - `background`: файл существует; расширение из `VIDEO_EXTS` (FR-10)
             - `bg_color`: `#rgb`, `#rrggbb` или имя из `COLOR_NAMES` (FR-10)
             - `mode`: одно из двух значений (FR-01, FR-02)
@@ -211,7 +211,11 @@ class TimerConfig:
             - `font`: файл существует, расширение `.ttf` / `.otf` / `.ttc` (FR-06)
             - `bg_style`: одно из `BG_STYLES` (FR-07)
             - `crf`: 0…51 при libx264 (FR-23)
-            - `encoder`: совместим с контейнером (FR-21)
+
+        Совместимость `encoder` с контейнером проверяет
+        `encoders.pick_encoder()`, который зовёт `resolved_encoder()` — не
+        `validate()`: там же проверяется наличие кодека в сборке ffmpeg
+        (FR-21, FR-22), а `validate()` остаётся без запуска внешних программ.
 
         Порядок проверок совпадает с порядком объявления полей, поэтому
         в GUI подсвечивается только первое ошибочное поле, а в сообщении
@@ -270,8 +274,11 @@ class TimerConfig:
             + ", ".join(COLOR_NAMES)
         )
 
-        if self.output.suffix.lower() != ".mp4":
-            fail("output", "в этой версии допустимо расширение .mp4")
+        if self.output.suffix.lower() not in FORMATS:
+            fail(
+                "output",
+                "ожидается одно из расширений: " + ", ".join(FORMATS),
+            )
 
         if self.background is not None:
             if not self.background.exists():
@@ -351,15 +358,18 @@ class TimerConfig:
             Имя кодека видео, как его понимает ffmpeg, например ``libx264``.
 
         Raises:
-            VideoTimerError: `encoder: кодек несовместим с расширением вывода`
-                (FR-21) или `encoder: кодек не найден в сборке ffmpeg` (FR-22);
-                обе проверки — v0.2.
+            VideoTimerError: `output: расширение не поддерживается` (FR-20),
+                `encoder: кодек … несовместим с контейнером …` (FR-21,
+                критерий A6) или `encoder: кодек … не найден в сборке ffmpeg`
+                (FR-22); всё это — сообщения `encoders.pick_encoder()`.
 
         Пример:
             TimerConfig(output=Path("a.mp4")).resolved_encoder()
             # "libx264"
         """
-        return "libx264"
+        from video_timer.encoders import pick_encoder
+
+        return pick_encoder(self.output, self.encoder)
 
     # since: v0.1 (FR-11, FR-12)
     def known_total_duration(self) -> float | None:

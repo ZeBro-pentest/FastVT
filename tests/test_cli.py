@@ -228,6 +228,56 @@ def test_parser_accepts_resolution_and_fit(tmp_path: Path) -> None:
     assert cfg.fit == "cover"
 
 
+def test_parser_accepts_encoder_crf_preset() -> None:
+    """Опции `--encoder`, `--crf`, `--preset` доходят до конфигурации (FR-21, FR-23)."""
+    args = build_parser().parse_args(
+        ["-o", "out.mp4", "--encoder", "libx264", "--crf", "20", "--preset", "fast"]
+    )
+    cfg = _config_from_args(args)
+
+    assert cfg.encoder == "libx264"
+    assert cfg.crf == 20
+    assert cfg.preset == "fast"
+
+
+def test_parser_encoder_defaults_to_none() -> None:
+    """Без `--encoder` кодек подбирается по расширению (FR-20)."""
+    cfg = _config_from_args(build_parser().parse_args(["-o", "out.mp4"]))
+
+    assert cfg.encoder is None
+
+
+def test_a6_incompatible_encoder_rejected_before_ffmpeg(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture, tmp_path: Path
+) -> None:
+    """A6: `.webm` + `--encoder libx264` — код 1, ошибка `encoder: …`, ffmpeg не запущен."""
+    started: list[object] = []
+
+    def _record(*args: object, **kwargs: object) -> object:
+        started.append(args)
+        raise AssertionError("ffmpeg не должен запускаться при несовместимом кодеке")
+
+    monkeypatch.setattr(
+        "video_timer.osutil.find_ffmpeg", lambda: Path("/usr/bin/ffmpeg")
+    )
+    monkeypatch.setattr("video_timer.renderer.subprocess.Popen", _record)
+    code = main(
+        [
+            "-o",
+            str(tmp_path / "out.webm"),
+            "--encoder",
+            "libx264",
+            "--duration",
+            "8",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert code == 1
+    assert captured.err.startswith("encoder: ")
+    assert started == []
+
+
 def test_parser_fit_defaults_to_contain() -> None:
     """Без `--fit` используется `contain`, как в `TimerConfig` (FR-14)."""
     cfg = _config_from_args(build_parser().parse_args(["-o", "out.mp4"]))

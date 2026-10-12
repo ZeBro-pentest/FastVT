@@ -192,10 +192,17 @@ def test_fit_rejects_unknown_mode(base_cfg: TimerConfig) -> None:
         cfg.validate()
 
 
-@pytest.mark.parametrize("suffix", [".mov", ".webm", ".mkv"])
-def test_output_extension_must_be_mp4(base_cfg: TimerConfig, suffix: str) -> None:
-    """В v0.1 вывод с другим расширением отклоняется (FR-20)."""
-    cfg = replace(base_cfg, output=base_cfg.output.with_suffix(suffix))
+@pytest.mark.parametrize("suffix", [".mp4", ".mov", ".mkv", ".webm"])
+def test_output_extension_accepts_supported_formats(
+    base_cfg: TimerConfig, suffix: str
+) -> None:
+    """Все расширения вывода из `FORMATS` принимаются (FR-20, v0.2)."""
+    replace(base_cfg, output=base_cfg.output.with_suffix(suffix)).validate()
+
+
+def test_output_extension_rejects_unknown(base_cfg: TimerConfig) -> None:
+    """Расширение вне `FORMATS` отклоняется с префиксом `output` (FR-20)."""
+    cfg = replace(base_cfg, output=base_cfg.output.with_suffix(".avi"))
 
     with pytest.raises(VideoTimerError, match=r"^output: "):
         cfg.validate()
@@ -359,6 +366,41 @@ def test_known_total_duration_countdown_on_image(
 def test_resolved_encoder_is_libx264(base_cfg: TimerConfig) -> None:
     """Для `.mp4` без явного кодек выбирается libx264 (FR-20)."""
     assert base_cfg.resolved_encoder() == "libx264"
+
+
+def test_resolved_encoder_webm_default(base_cfg: TimerConfig) -> None:
+    """Для `.webm` без явного кодек выбирается libvpx-vp9 (FR-20)."""
+    cfg = replace(base_cfg, output=base_cfg.output.with_suffix(".webm"))
+
+    assert cfg.resolved_encoder() == "libvpx-vp9"
+
+
+def test_resolved_encoder_uses_requested_codec(
+    base_cfg: TimerConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Явный `encoder` выигрывает у выбора по расширению (FR-21, FR-22)."""
+    from video_timer import encoders
+
+    monkeypatch.setattr(encoders, "available_encoders", lambda: {"libvpx-vp9"})
+    cfg = replace(
+        base_cfg,
+        output=base_cfg.output.with_suffix(".webm"),
+        encoder="libvpx-vp9",
+    )
+
+    assert cfg.resolved_encoder() == "libvpx-vp9"
+
+
+def test_resolved_encoder_rejects_incompatible(base_cfg: TimerConfig) -> None:
+    """Несовместимая пара кодек/контейнер отклоняется как `encoder: …` (A6, FR-21)."""
+    cfg = replace(
+        base_cfg,
+        output=base_cfg.output.with_suffix(".webm"),
+        encoder="libx264",
+    )
+
+    with pytest.raises(VideoTimerError, match=r"^encoder: "):
+        cfg.resolved_encoder()
 
 
 def test_error_message_has_field_prefix(base_cfg: TimerConfig) -> None:

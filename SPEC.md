@@ -194,7 +194,7 @@ class TimerConfig:
 | `fps` | 1…120 |
 | `duration` | > 0, если задан; обязателен для stopwatch без видео-фона |
 | `output` | расширение из FR-20 |
-| `encoder` | совместим с контейнером (FR-21) |
+| `encoder` | совместим с контейнером (FR-21) — проверяет `encoders.pick_encoder()` из `resolved_encoder()`, чтобы `validate()` не запускала внешних программ |
 
 ### 7.2 `background.py`
 

@@ -60,7 +60,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         required=True,
         metavar="ПУТЬ",
-        help="Путь к выходному MP4 (обязателен)",
+        help="Путь к выходному файлу: mp4, mov, mkv или webm (обязателен)",
     )
     parser.add_argument(
         "--mode",
@@ -147,6 +147,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="Как вписать фон в разрешение (по умолчанию contain)",
     )
     parser.add_argument(
+        "--encoder",
+        type=str,
+        default=None,
+        help="Кодек видео вручную, иначе по расширению (опц.)",
+    )
+    parser.add_argument(
+        "--crf",
+        type=int,
+        default=18,
+        help="Качество libx264, 0…51 (по умолчанию 18)",
+    )
+    parser.add_argument(
+        "--preset",
+        type=str,
+        default="medium",
+        help="Скорость кодирования libx264 (по умолчанию medium)",
+    )
+    parser.add_argument(
         "--version",
         action="version",
         version=f"%(prog)s {__version__}",
@@ -198,6 +216,9 @@ def _config_from_args(args: argparse.Namespace) -> TimerConfig:
         fps=args.fps,
         resolution=getattr(args, "resolution", None),
         fit=getattr(args, "fit", "contain"),
+        encoder=getattr(args, "encoder", None),
+        crf=getattr(args, "crf", 18),
+        preset=getattr(args, "preset", "medium"),
     )
 
 
