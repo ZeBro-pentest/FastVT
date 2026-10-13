@@ -207,6 +207,17 @@ class FilterBuilder:
             f"x={x}",
             f"y={y}",
         ]
+
+        bg_style = self.cfg.bg_style
+        if bg_style == "shadow":
+            arguments.append("shadowcolor=black@0.5")
+            arguments.append("shadowx=2")
+            arguments.append("shadowy=2")
+        elif bg_style == "box":
+            arguments.append("box=1")
+            arguments.append("boxcolor=black@0.5")
+            arguments.append("boxborderw=8")
+
         if enable is not None:
             arguments.append(f"enable={_escape_enable(enable)}")
         return "drawtext=" + ":".join(arguments)

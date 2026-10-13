@@ -16,12 +16,13 @@ from __future__ import annotations
 
 from video_timer.config import VideoTimerError
 
-# since: v0.1 (FR-04), остальные форматы — v0.2
+# since: v0.2 (FR-04): все три формата доступны с v0.2
 FORMATS: tuple[str, ...] = ("mmss", "hhmmss", "mmssms")
 """Поддерживаемые форматы часов.
 
-В v0.1 доступен только ``mmss`` (``мм:сс``). Значения ``hhmmss`` и
-``mmssms`` входят в v0.2 (FR-04).
+- ``mmss`` — ``мм:сс``
+- ``hhmmss`` — ``чч:мм:сс``
+- ``mmssms`` — ``мм:сс.сс`` (сотые секунды)
 """
 
 
@@ -95,21 +96,41 @@ def clock_expression(value_expr: str, fmt: str) -> str:
 
     Raises:
         VideoTimerError: `fmt: неизвестный формат часов` — если `fmt` не из
-            :data:`FORMATS`; в v0.1 дополнительно принимается только `mmss`.
+            :data:`FORMATS`.
 
     Пример:
         clock_expression("t", "mmss")
         # "<выражение, печатающее 00:05 при t=5>"
     """
-    if fmt != "mmss":
-        raise VideoTimerError(
-            f"fmt: формат {fmt} доступен с версии 0.2, в 0.1 только mmss"
-        )
+    if fmt not in FORMATS:
+        raise VideoTimerError(f"fmt: неизвестный формат часов: {fmt}")
 
     value = f"max(0,{value_expr})"
     minutes = f"floor({value}/60)"
-    seconds = f"{value}-60*{minutes}"
-    raw = f"%{{eif:{minutes}:d:2}}:%{{eif:{seconds}:d:2}}"
+
+    if fmt == "mmss":
+        seconds = f"{value}-60*{minutes}"
+        raw = f"%{{eif:{minutes}:d:2}}:%{{eif:{seconds}:d:2}}"
+        return _escape(raw)
+
+    if fmt == "hhmmss":
+        hours = f"floor({value}/3600)"
+        minutes_expr = f"floor(({value}-3600*{hours})/60)"
+        seconds_expr = f"{value}-60*floor({value}/60)"
+        raw = (
+            f"%{{eif:{hours}:d:2}}:%{{eif:{minutes_expr}:d:2}}"
+            f":%{{eif:{seconds_expr}:d:2}}"
+        )
+        return _escape(raw)
+
+    # mmssms — минуты, секунды и сотые доли секунды
+    seconds_floor = f"floor({value})"
+    whole_seconds = f"{seconds_floor}-60*{minutes}"
+    centiseconds = f"floor(100*({value}-{seconds_floor}))"
+    raw = (
+        f"%{{eif:{minutes}:d:2}}:%{{eif:{whole_seconds}:d:2}}"
+        f".%{{eif:{centiseconds}:d:2}}"
+    )
     return _escape(raw)
 
 
@@ -162,8 +183,12 @@ def static_clock_text(fmt: str) -> str:
         static_clock_text("mmss")
         # "00:00"
     """
-    if fmt != "mmss":
-        raise VideoTimerError(
-            f"fmt: формат {fmt} доступен с версии 0.2, в 0.1 только mmss"
-        )
-    return "00:00"
+    if fmt not in FORMATS:
+        raise VideoTimerError(f"fmt: неизвестный формат часов: {fmt}")
+
+    if fmt == "mmss":
+        return "00:00"
+    if fmt == "hhmmss":
+        return "00:00:00"
+    # mmssms
+    return "00:00.00"

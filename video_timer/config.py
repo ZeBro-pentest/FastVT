@@ -206,11 +206,11 @@ class TimerConfig:
             - `resolution`: `^\\d+x\\d+$`, обе стороны > 0 (FR-13)
             - `fit`: одно из `FIT_MODES` (FR-14)
 
-        Проверки v0.2 (объявлены, выполняются позже):
+        Проверки v0.2 (выполняются с 13.10):
             - `fmt`: одно из `mmss`, `hhmmss`, `mmssms` (FR-04)
             - `font`: файл существует, расширение `.ttf` / `.otf` / `.ttc` (FR-06)
             - `bg_style`: одно из `BG_STYLES` (FR-07)
-            - `crf`: 0…51 при libx264 (FR-23)
+            - `crf`: 0…51 при libx264 (FR-23) — выполняется позже
 
         Совместимость `encoder` с контейнером проверяет
         `encoders.pick_encoder()`, который зовёт `resolved_encoder()` — не
@@ -313,9 +313,18 @@ class TimerConfig:
             if self.background is None or self._is_image():
                 fail("duration", "обязателен для секундомера без видео-фона")
 
+        if self.fmt not in ("mmss", "hhmmss", "mmssms"):
+            fail("fmt", "ожидается одно из: mmss, hhmmss, mmssms")
+
         if self.position not in POSITIONS:
             fail("position", "ожидается одно из: " + ", ".join(POSITIONS))
 
+        if self.font is not None:
+            font_path = Path(self.font)
+            if not font_path.exists():
+                fail("font", f"файл не найден: {font_path}")
+            if font_path.suffix.lower() not in (".ttf", ".otf", ".ttc"):
+                fail("font", "ожидается .ttf, .otf или .ttc")
         if not 8 <= number("font_size", self.font_size) <= 500:
             fail("font_size", "должен быть от 8 до 500")
 
@@ -327,6 +336,9 @@ class TimerConfig:
 
         if not _is_valid_color(self.hold_color):
             fail("hold_color", color_problem)
+
+        if self.bg_style not in BG_STYLES:
+            fail("bg_style", "ожидается одно из: " + ", ".join(BG_STYLES))
 
         if self.resolution is not None:
             match = _RESOLUTION_RE.match(str(self.resolution))

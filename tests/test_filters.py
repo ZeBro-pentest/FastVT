@@ -367,6 +367,21 @@ def test_scale_chain_is_parsed_by_real_ffmpeg(base_cfg: TimerConfig) -> None:
     assert _ffmpeg_accepts(builder(base_cfg).build())
 
 
-def test_shadow_style_adds_box_filter(base_cfg: TimerConfig) -> None:
-    """Подложка `shadow` добавляет фильтр тени под текстом (FR-07)."""
-    pytest.fail("не реализовано: FR-07 — box подложка для bg_style=shadow (v0.2)")
+def test_shadow_style_adds_shadow_to_drawtext(base_cfg: TimerConfig) -> None:
+    """Подложка `shadow` добавляет тень под текстом (FR-07)."""
+    base_cfg.bg_style = "shadow"
+    shadow_timer = builder(base_cfg).build_timer_filters()[0]
+
+    assert "shadowcolor=" in shadow_timer
+    assert "shadowx=" in shadow_timer
+    assert "shadowy=" in shadow_timer
+
+    base_cfg.bg_style = "box"
+    box_timer = builder(base_cfg).build_timer_filters()[0]
+    assert "box=1" in box_timer
+    assert "boxcolor=" in box_timer
+
+    base_cfg.bg_style = "none"
+    none_timer = builder(base_cfg).build_timer_filters()[0]
+    assert "shadowcolor=" not in none_timer
+    assert "box=1" not in none_timer
